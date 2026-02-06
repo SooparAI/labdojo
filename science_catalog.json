@@ -1,0 +1,533 @@
+{
+  "version": "1.0",
+  "description": "Lab Dojo Science Data Sources Catalog - 50+ MCPs, 25+ APIs",
+  
+  "mcp_servers": {
+    "literature": [
+      {
+        "id": "pubmed_mcp",
+        "name": "PubMed Literature Search",
+        "github": "https://github.com/augmented-nature/pubmed-mcp",
+        "api_endpoint": "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/",
+        "tools": ["paper_search", "abstract_retrieval", "citation_analysis", "mesh_terms"],
+        "modalities": ["text_mining", "literature"],
+        "requires_api_key": false,
+        "rate_limit": "3/sec without key, 10/sec with key"
+      },
+      {
+        "id": "biorxiv_mcp",
+        "name": "bioRxiv Preprints",
+        "github": "https://github.com/JackKuo666/biorxiv-mcp",
+        "api_endpoint": "https://api.biorxiv.org",
+        "tools": ["preprint_search", "metadata_extraction", "local_caching"],
+        "modalities": ["preprints", "biology"],
+        "requires_api_key": false
+      },
+      {
+        "id": "medrxiv_mcp",
+        "name": "medRxiv Medical Preprints",
+        "github": "https://github.com/JackKuo666/medrxiv-mcp",
+        "api_endpoint": "https://api.medrxiv.org",
+        "tools": ["clinical_preprint_search", "study_discovery"],
+        "modalities": ["preprints", "clinical"],
+        "requires_api_key": false
+      },
+      {
+        "id": "semantic_scholar_mcp",
+        "name": "Semantic Scholar",
+        "api_endpoint": "https://api.semanticscholar.org",
+        "tools": ["academic_search", "citation_graphs", "author_lookup"],
+        "modalities": ["literature", "citations"],
+        "requires_api_key": true
+      },
+      {
+        "id": "arxiv_mcp",
+        "name": "arXiv Preprints",
+        "github": "https://github.com/cognitivecomputations/arxiv-mcp",
+        "api_endpoint": "http://export.arxiv.org/api/query",
+        "tools": ["preprint_search", "category_browse"],
+        "modalities": ["preprints", "physics", "cs", "bio"],
+        "requires_api_key": false
+      }
+    ],
+    
+    "genomics": [
+      {
+        "id": "ensembl_mcp",
+        "name": "Ensembl Genome Browser",
+        "github": "https://github.com/AugmentedNature/ensembl-mcp",
+        "api_endpoint": "https://rest.ensembl.org",
+        "tools": ["gene_lookup", "sequence_retrieval", "variant_annotation", "regulatory_regions", "homology", "comparative_genomics"],
+        "tools_count": 25,
+        "modalities": ["genomics"],
+        "requires_api_key": false
+      },
+      {
+        "id": "ncbi_datasets_mcp",
+        "name": "NCBI Datasets",
+        "github": "https://github.com/AugmentedNature/ncbi-datasets-mcp",
+        "api_endpoint": "https://api.ncbi.nlm.nih.gov/datasets/",
+        "tools": ["genome_assemblies", "gene_models", "taxonomy", "sequence_download"],
+        "tools_count": 31,
+        "modalities": ["genomics"],
+        "requires_api_key": false
+      },
+      {
+        "id": "gtex_mcp",
+        "name": "GTEx Portal",
+        "github": "https://github.com/AugmentedNature/gtex-mcp",
+        "api_endpoint": "https://gtexportal.org/api",
+        "tools": ["tissue_expression", "eqtls", "variant_gene_associations", "multi_tissue_eqtl"],
+        "tools_count": 25,
+        "modalities": ["genomics", "transcriptomics"],
+        "requires_api_key": false
+      },
+      {
+        "id": "gene_ontology_mcp",
+        "name": "Gene Ontology",
+        "github": "https://github.com/AugmentedNature/go-mcp",
+        "api_endpoint": "http://api.geneontology.org",
+        "tools": ["term_search", "ontology_navigation", "gene_annotations", "enrichment"],
+        "modalities": ["genomics", "ontology"],
+        "requires_api_key": false
+      },
+      {
+        "id": "ncbi_gene_mcp",
+        "name": "NCBI Gene",
+        "api_endpoint": "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/",
+        "tools": ["gene_info", "expression_data", "orthologs", "gene_links"],
+        "modalities": ["genomics"],
+        "requires_api_key": false
+      },
+      {
+        "id": "genbank_mcp",
+        "name": "GenBank",
+        "api_endpoint": "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/",
+        "tools": ["sequence_retrieval", "annotations", "feature_tables"],
+        "modalities": ["genomics", "sequences"],
+        "requires_api_key": false
+      },
+      {
+        "id": "dbsnp_mcp",
+        "name": "dbSNP",
+        "api_endpoint": "https://api.ncbi.nlm.nih.gov/variation/v0/",
+        "tools": ["variant_lookup", "population_frequencies", "clinical_significance"],
+        "modalities": ["genomics", "variants"],
+        "requires_api_key": false
+      },
+      {
+        "id": "clinvar_mcp",
+        "name": "ClinVar",
+        "api_endpoint": "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/",
+        "tools": ["pathogenic_variants", "clinical_interpretations", "condition_associations"],
+        "modalities": ["genomics", "clinical"],
+        "requires_api_key": false
+      }
+    ],
+    
+    "proteomics": [
+      {
+        "id": "uniprot_mcp",
+        "name": "UniProt",
+        "github": "https://github.com/AugmentedNature/uniprot-mcp",
+        "api_endpoint": "https://rest.uniprot.org",
+        "tools": ["protein_search", "sequence_retrieval", "function_annotation", "domain_analysis", "ptm_sites", "isoforms"],
+        "modalities": ["proteomics"],
+        "requires_api_key": false
+      },
+      {
+        "id": "pdb_mcp",
+        "name": "Protein Data Bank",
+        "github": "https://github.com/AugmentedNature/pdb-mcp",
+        "api_endpoint": "https://data.rcsb.org",
+        "tools": ["structure_search", "3d_coordinates", "ligand_binding", "resolution_filter"],
+        "modalities": ["proteomics", "structures"],
+        "requires_api_key": false
+      },
+      {
+        "id": "alphafold_mcp",
+        "name": "AlphaFold Database",
+        "github": "https://github.com/AugmentedNature/alphafold-mcp",
+        "api_endpoint": "https://alphafold.ebi.ac.uk/api/",
+        "tools": ["predicted_structures", "confidence_scores", "batch_queries"],
+        "modalities": ["proteomics", "structures"],
+        "requires_api_key": false
+      },
+      {
+        "id": "interpro_mcp",
+        "name": "InterPro",
+        "api_endpoint": "https://www.ebi.ac.uk/interpro/api/",
+        "tools": ["protein_family_classification", "domain_identification", "signature_matching"],
+        "modalities": ["proteomics"],
+        "requires_api_key": false
+      },
+      {
+        "id": "pfam_mcp",
+        "name": "Pfam",
+        "api_endpoint": "https://www.ebi.ac.uk/interpro/api/",
+        "tools": ["protein_families", "domain_architectures", "clan_information"],
+        "modalities": ["proteomics"],
+        "requires_api_key": false
+      },
+      {
+        "id": "string_mcp",
+        "name": "STRING Protein Interactions",
+        "github": "https://mcpservers.org/server/string",
+        "api_endpoint": "https://string-db.org/api",
+        "tools": ["interaction_networks", "enrichment_analysis", "functional_partners", "network_images"],
+        "modalities": ["proteomics", "interactions"],
+        "requires_api_key": false
+      },
+      {
+        "id": "proteomicsdb_mcp",
+        "name": "ProteomicsDB",
+        "api_endpoint": "https://www.proteomicsdb.org/api",
+        "tools": ["protein_expression", "tissue_profiles", "drug_targets"],
+        "modalities": ["proteomics"],
+        "requires_api_key": false
+      }
+    ],
+    
+    "pathways": [
+      {
+        "id": "reactome_mcp",
+        "name": "Reactome",
+        "github": "https://github.com/AugmentedNature/reactome-mcp",
+        "api_endpoint": "https://reactome.org/ContentService",
+        "tools": ["pathway_search", "gene_to_pathway", "interaction_networks", "pathway_diagrams"],
+        "modalities": ["pathways"],
+        "requires_api_key": false
+      },
+      {
+        "id": "kegg_mcp",
+        "name": "KEGG",
+        "api_endpoint": "https://rest.kegg.jp",
+        "tools": ["pathway_database", "metabolic_maps", "disease_pathways", "drug_pathways"],
+        "modalities": ["pathways", "metabolism"],
+        "requires_api_key": false
+      },
+      {
+        "id": "wikipathways_mcp",
+        "name": "WikiPathways",
+        "api_endpoint": "https://webservice.wikipathways.org",
+        "tools": ["community_pathways", "pathway_search", "gpml_download"],
+        "modalities": ["pathways"],
+        "requires_api_key": false
+      },
+      {
+        "id": "pathwaycommons_mcp",
+        "name": "Pathway Commons",
+        "api_endpoint": "https://www.pathwaycommons.org/pc2/",
+        "tools": ["aggregated_pathways", "network_search", "graph_queries"],
+        "modalities": ["pathways"],
+        "requires_api_key": false
+      },
+      {
+        "id": "biocyc_mcp",
+        "name": "BioCyc",
+        "api_endpoint": "https://websvc.biocyc.org",
+        "tools": ["metabolic_pathways", "organism_databases", "reaction_search"],
+        "modalities": ["pathways", "metabolism"],
+        "requires_api_key": false
+      }
+    ],
+    
+    "chemicals_drugs": [
+      {
+        "id": "pubchem_mcp",
+        "name": "PubChem",
+        "github": "https://github.com/cyanheads/pubchem-mcp",
+        "api_endpoint": "https://pubchem.ncbi.nlm.nih.gov/rest/pug",
+        "tools": ["compound_search", "property_lookup", "bioactivity_data", "structure_search", "similarity_search"],
+        "modalities": ["chemistry", "drugs"],
+        "requires_api_key": false
+      },
+      {
+        "id": "chembl_mcp",
+        "name": "ChEMBL",
+        "github": "https://github.com/AugmentedNature/chembl-mcp",
+        "api_endpoint": "https://www.ebi.ac.uk/chembl/api/data",
+        "tools": ["bioactivity_database", "target_compound_associations", "assay_data", "drug_mechanisms"],
+        "modalities": ["chemistry", "drugs"],
+        "requires_api_key": false
+      },
+      {
+        "id": "surechembl_mcp",
+        "name": "SureChEMBL",
+        "github": "https://github.com/AugmentedNature/surechembl-mcp",
+        "api_endpoint": "https://www.surechembl.org/api",
+        "tools": ["patent_chemistry", "compound_patents", "freedom_to_operate"],
+        "modalities": ["chemistry", "patents"],
+        "requires_api_key": false
+      },
+      {
+        "id": "openfda_mcp",
+        "name": "OpenFDA",
+        "github": "https://github.com/AugmentedNature/openfda-mcp",
+        "api_endpoint": "https://api.fda.gov",
+        "tools": ["drug_labels", "adverse_events", "recalls", "ndc_lookup"],
+        "modalities": ["drugs", "clinical"],
+        "requires_api_key": false
+      },
+      {
+        "id": "drugbank_mcp",
+        "name": "DrugBank",
+        "api_endpoint": "https://go.drugbank.com/api",
+        "tools": ["drug_information", "targets", "pathways", "interactions"],
+        "modalities": ["drugs"],
+        "requires_api_key": true,
+        "note": "Requires license for full access"
+      },
+      {
+        "id": "chemspider_mcp",
+        "name": "ChemSpider",
+        "api_endpoint": "https://api.rsc.org/compounds/v1",
+        "tools": ["structure_search", "compound_properties", "data_sources"],
+        "modalities": ["chemistry"],
+        "requires_api_key": true
+      },
+      {
+        "id": "zinc_mcp",
+        "name": "ZINC Database",
+        "api_endpoint": "https://zinc.docking.org/api",
+        "tools": ["purchasable_compounds", "vendor_search", "analog_search"],
+        "modalities": ["chemistry", "screening"],
+        "requires_api_key": false
+      },
+      {
+        "id": "bindingdb_mcp",
+        "name": "BindingDB",
+        "api_endpoint": "https://www.bindingdb.org/axis2/services/BDBService",
+        "tools": ["binding_affinities", "ki_values", "ic50_data"],
+        "modalities": ["chemistry", "pharmacology"],
+        "requires_api_key": false
+      }
+    ],
+    
+    "clinical": [
+      {
+        "id": "clinicaltrials_mcp",
+        "name": "ClinicalTrials.gov",
+        "github": "https://github.com/AugmentedNature/clinicaltrials-mcp",
+        "api_endpoint": "https://clinicaltrials.gov/api/v2",
+        "tools": ["trial_search", "enrollment_status", "outcomes", "eligibility_criteria"],
+        "modalities": ["clinical"],
+        "requires_api_key": false
+      },
+      {
+        "id": "omim_mcp",
+        "name": "OMIM",
+        "api_endpoint": "https://api.omim.org/api",
+        "tools": ["genetic_disorders", "gene_phenotype_relationships", "inheritance_patterns"],
+        "modalities": ["clinical", "genetics"],
+        "requires_api_key": true
+      },
+      {
+        "id": "hpo_mcp",
+        "name": "Human Phenotype Ontology",
+        "api_endpoint": "https://hpo.jax.org/api",
+        "tools": ["phenotype_annotations", "disease_phenotypes", "gene_phenotypes"],
+        "modalities": ["clinical", "ontology"],
+        "requires_api_key": false
+      },
+      {
+        "id": "disgenet_mcp",
+        "name": "DisGeNET",
+        "api_endpoint": "https://www.disgenet.org/api",
+        "tools": ["gene_disease_associations", "variant_disease", "evidence_scores"],
+        "modalities": ["clinical", "genetics"],
+        "requires_api_key": true
+      },
+      {
+        "id": "pharmgkb_mcp",
+        "name": "PharmGKB",
+        "api_endpoint": "https://api.pharmgkb.org",
+        "tools": ["pharmacogenomics", "drug_response_variants", "clinical_annotations"],
+        "modalities": ["clinical", "pharmacology"],
+        "requires_api_key": false
+      },
+      {
+        "id": "gwas_catalog_mcp",
+        "name": "GWAS Catalog",
+        "api_endpoint": "https://www.ebi.ac.uk/gwas/rest/api",
+        "tools": ["gwas_associations", "trait_search", "snp_associations"],
+        "modalities": ["genomics", "clinical"],
+        "requires_api_key": false
+      }
+    ],
+    
+    "single_cell_omics": [
+      {
+        "id": "cellxgene_mcp",
+        "name": "CellxGene",
+        "api_endpoint": "https://api.cellxgene.cziscience.com",
+        "tools": ["single_cell_atlas", "cell_type_markers", "gene_expression"],
+        "modalities": ["single_cell", "transcriptomics"],
+        "requires_api_key": false
+      },
+      {
+        "id": "human_cell_atlas_mcp",
+        "name": "Human Cell Atlas",
+        "api_endpoint": "https://service.azul.data.humancellatlas.org",
+        "tools": ["reference_atlases", "cell_type_annotations", "dataset_search"],
+        "modalities": ["single_cell"],
+        "requires_api_key": false
+      },
+      {
+        "id": "tcga_mcp",
+        "name": "TCGA (Cancer Genome Atlas)",
+        "api_endpoint": "https://api.gdc.cancer.gov",
+        "tools": ["cancer_genomics", "mutation_data", "expression_data", "clinical_data"],
+        "modalities": ["genomics", "cancer"],
+        "requires_api_key": false
+      },
+      {
+        "id": "ccle_mcp",
+        "name": "CCLE (Cancer Cell Line Encyclopedia)",
+        "api_endpoint": "https://depmap.org/portal/api/",
+        "tools": ["cell_line_omics", "drug_sensitivity", "gene_dependencies"],
+        "modalities": ["cancer", "cell_lines"],
+        "requires_api_key": false
+      },
+      {
+        "id": "depmap_mcp",
+        "name": "DepMap",
+        "api_endpoint": "https://depmap.org/portal/api/",
+        "tools": ["gene_dependencies", "crispr_screens", "drug_responses"],
+        "modalities": ["cancer", "functional_genomics"],
+        "requires_api_key": false
+      }
+    ],
+    
+    "integrated": [
+      {
+        "id": "biotools_mcp",
+        "name": "BioTools (BACH-AI)",
+        "github": "https://github.com/BACH-AI-Tools/BioTools-MCP",
+        "tools": ["unified_bio_queries", "pubmed", "uniprot", "genbank", "kegg", "pdb"],
+        "modalities": ["all"],
+        "requires_api_key": false
+      },
+      {
+        "id": "biothings_mcp",
+        "name": "BioThings (MyGene/MyVariant)",
+        "github": "https://github.com/AugmentedNature/biothings-mcp",
+        "api_endpoint": "https://mygene.info,https://myvariant.info",
+        "tools": ["gene_annotations", "variant_annotations", "batch_queries"],
+        "modalities": ["genomics", "variants"],
+        "requires_api_key": false
+      },
+      {
+        "id": "holy_bio_mcp",
+        "name": "Holy Bio (Longevity Genie)",
+        "github": "https://github.com/longevity-genie/holy-bio-mcp",
+        "tools": ["gget_library", "multi_bio_tools", "sequence_analysis"],
+        "modalities": ["all"],
+        "requires_api_key": false
+      },
+      {
+        "id": "pluto_bio_mcp",
+        "name": "Pluto Bio",
+        "api_endpoint": "https://pluto.bio",
+        "tools": ["multi_omics_analysis", "visualization", "tcga_ccle_integration"],
+        "modalities": ["all"],
+        "requires_api_key": true,
+        "note": "Commercial platform"
+      },
+      {
+        "id": "metabolights_mcp",
+        "name": "MetaboLights",
+        "api_endpoint": "https://www.ebi.ac.uk/metabolights/ws",
+        "tools": ["metabolomics_repository", "metabolite_search", "study_browser"],
+        "modalities": ["metabolomics"],
+        "requires_api_key": false
+      }
+    ]
+  },
+  
+  "direct_apis": [
+    {"name": "NCBI E-utilities", "endpoint": "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/", "auth": "free", "use": "PubMed, GenBank, Gene"},
+    {"name": "UniProt REST", "endpoint": "https://rest.uniprot.org", "auth": "free", "use": "Protein data"},
+    {"name": "EBI Proteins API", "endpoint": "https://www.ebi.ac.uk/proteins/api", "auth": "free", "use": "Protein annotations"},
+    {"name": "PDB REST API", "endpoint": "https://data.rcsb.org", "auth": "free", "use": "3D structures"},
+    {"name": "STRING API", "endpoint": "https://string-db.org/api", "auth": "free", "use": "Protein interactions"},
+    {"name": "Reactome API", "endpoint": "https://reactome.org/ContentService", "auth": "free", "use": "Pathways"},
+    {"name": "KEGG REST", "endpoint": "https://rest.kegg.jp", "auth": "free", "use": "Pathways/metabolism"},
+    {"name": "PubChem PUG", "endpoint": "https://pubchem.ncbi.nlm.nih.gov/rest/pug", "auth": "free", "use": "Chemical compounds"},
+    {"name": "ChEMBL API", "endpoint": "https://www.ebi.ac.uk/chembl/api/data", "auth": "free", "use": "Bioactivity"},
+    {"name": "OpenFDA", "endpoint": "https://api.fda.gov", "auth": "free", "use": "Drug safety"},
+    {"name": "ClinicalTrials.gov", "endpoint": "https://clinicaltrials.gov/api/v2", "auth": "free", "use": "Trial data"},
+    {"name": "GTEx API", "endpoint": "https://gtexportal.org/api", "auth": "free", "use": "Expression/eQTLs"},
+    {"name": "AlphaFold DB", "endpoint": "https://alphafold.ebi.ac.uk/api/", "auth": "free", "use": "Predicted structures"},
+    {"name": "cBioPortal API", "endpoint": "https://www.cbioportal.org/api", "auth": "free", "use": "Cancer genomics"},
+    {"name": "GDC API", "endpoint": "https://api.gdc.cancer.gov", "auth": "free", "use": "TCGA data"},
+    {"name": "DepMap API", "endpoint": "https://depmap.org/portal/api/", "auth": "free", "use": "Cancer dependencies"},
+    {"name": "gnomAD", "endpoint": "https://gnomad.broadinstitute.org/api", "auth": "free", "use": "Population genetics"},
+    {"name": "Ensembl REST", "endpoint": "https://rest.ensembl.org", "auth": "free", "use": "Genome browser"},
+    {"name": "UCSC Genome API", "endpoint": "https://api.genome.ucsc.edu", "auth": "free", "use": "Genome browser"},
+    {"name": "BioGRID REST", "endpoint": "https://webservice.thebiogrid.org", "auth": "free", "use": "Interactions"},
+    {"name": "IntAct API", "endpoint": "https://www.ebi.ac.uk/intact/ws", "auth": "free", "use": "Molecular interactions"},
+    {"name": "MGI REST", "endpoint": "http://www.informatics.jax.org/downloads", "auth": "free", "use": "Mouse genomics"},
+    {"name": "WormBase API", "endpoint": "https://wormbase.org/rest", "auth": "free", "use": "C. elegans data"},
+    {"name": "FlyBase API", "endpoint": "https://flybase.org/api", "auth": "free", "use": "Drosophila data"},
+    {"name": "TAIR API", "endpoint": "https://www.arabidopsis.org/tools", "auth": "free", "use": "Arabidopsis data"}
+  ],
+  
+  "phd_agents": [
+    {
+      "name": "AI Professor",
+      "role": "orchestrator",
+      "capabilities": ["planning", "delegation", "synthesis", "quality_control"],
+      "model": "local_7b",
+      "description": "User-facing orchestrator, handles routing and synthesis"
+    },
+    {
+      "name": "PlannerPhD",
+      "role": "experimental_design",
+      "capabilities": ["protocol_design", "hypothesis_formulation", "experiment_planning"],
+      "model": "serverless_32b",
+      "description": "Designs experiments and formulates testable hypotheses"
+    },
+    {
+      "name": "VirtualCellPhD",
+      "role": "simulation",
+      "capabilities": ["pathway_simulation", "perturbation_analysis", "systems_biology"],
+      "model": "serverless_32b",
+      "description": "Simulates cellular processes and predicts outcomes"
+    },
+    {
+      "name": "AnalystPhD",
+      "role": "data_analysis",
+      "capabilities": ["statistical_analysis", "data_interpretation", "visualization"],
+      "model": "serverless_32b",
+      "description": "Analyzes experimental data and generates insights"
+    },
+    {
+      "name": "CriticPhD",
+      "role": "quality_control",
+      "capabilities": ["hypothesis_critique", "methodology_review", "bias_detection"],
+      "model": "serverless_32b",
+      "description": "Critically evaluates hypotheses and methodologies"
+    },
+    {
+      "name": "LiteraturePhD",
+      "role": "literature_review",
+      "capabilities": ["paper_synthesis", "citation_analysis", "gap_identification"],
+      "model": "local_7b",
+      "description": "Reviews and synthesizes scientific literature"
+    }
+  ],
+  
+  "research_topics": {
+    "ramakrishnan_lab": [
+      "NF-kB O-GlcNAcylation",
+      "c-Rel psoriasis",
+      "Sam68 T cell",
+      "immunometabolism Treg",
+      "HBP AML metabolism",
+      "O-GlcNAc signaling",
+      "inflammatory signaling",
+      "autoimmunity metabolism"
+    ]
+  }
+}
