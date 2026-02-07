@@ -51,11 +51,11 @@ import uvicorn
 class Config:
     """Lab Dojo configuration"""
     # Vast.ai Serverless
-    vastai_api_key: str = "c753c72326d37aa6a8dc9e0b50e175aac1b90faf773762110f62858fb1d5bced"
+    vastai_api_key: str = ""
     vastai_api_base: str = "https://console.vast.ai/api/v0"
     serverless_endpoint: str = "labdojo-qwen32b"
-    serverless_endpoint_id: int = 11809
-    serverless_workergroup_id: int = 16559
+    serverless_endpoint_id: int = 0
+    serverless_workergroup_id: int = 0
     
     # Local Ollama
     ollama_host: str = "http://localhost:11434"
@@ -91,13 +91,7 @@ class Config:
     auto_approve_science_apis: bool = True
     
     # Research Settings
-    research_topics: List[str] = field(default_factory=lambda: [
-        "NF-kB O-GlcNAcylation",
-        "c-Rel psoriasis",
-        "Sam68 T cell",
-        "immunometabolism Treg",
-        "HBP AML metabolism"
-    ])
+    research_topics: List[str] = field(default_factory=list)
     pubmed_check_interval_hours: int = 6
     morning_briefing_hour: int = 8
     
@@ -112,7 +106,26 @@ class Config:
         (self.config_dir / "knowledge").mkdir(exist_ok=True)
         (self.config_dir / "papers").mkdir(exist_ok=True)
         (self.config_dir / "exports").mkdir(exist_ok=True)
-        self.ncbi_api_key = os.environ.get("NCBI_API_KEY", self.ncbi_api_key)
+        # Environment variable overrides (highest priority)
+        env_map = {
+            "VASTAI_API_KEY": "vastai_api_key",
+            "VASTAI_ENDPOINT_ID": "serverless_endpoint_id",
+            "OLLAMA_HOST": "ollama_host",
+            "OLLAMA_MODEL": "ollama_model",
+            "OPENAI_API_KEY": "openai_api_key",
+            "ANTHROPIC_API_KEY": "anthropic_api_key",
+            "NCBI_API_KEY": "ncbi_api_key",
+            "LABDOJO_PORT": "port",
+            "LABDOJO_HOST": "host",
+        }
+        for env_var, field_name in env_map.items():
+            val = os.environ.get(env_var)
+            if val:
+                field_type = type(getattr(self, field_name))
+                try:
+                    setattr(self, field_name, field_type(val))
+                except (ValueError, TypeError):
+                    pass
     
     @classmethod
     def load(cls) -> "Config":
@@ -127,7 +140,10 @@ class Config:
     
     def save(self):
         config_file = self.config_dir / "config.json"
-        config_file.write_text(json.dumps(asdict(self), indent=2, default=str))
+        # Mask API keys in saved config for safety
+        data = asdict(self)
+        data["config_dir"] = str(data["config_dir"])
+        config_file.write_text(json.dumps(data, indent=2, default=str))
 
 
 # ============================================================================
@@ -166,10 +182,21 @@ class KnowledgeBase:
     def __init__(self, config: Config):
         self.config = config
         self.db_path = config.config_dir / "knowledge.db"
+        self._lock = __import__('threading').Lock()
+        self._conn = sqlite3.connect(self.db_path, timeout=60, check_same_thread=False)
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA busy_timeout=10000")
+        self._conn.execute("PRAGMA synchronous=NORMAL")
         self._init_db()
     
+    def _get_conn(self):
+        """Return the persistent connection (thread-safe via _lock)."""
+        return self._conn
+    
     def _init_db(self):
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_conn()
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=5000")
         c = conn.cursor()
         
         # ===== EXISTING TABLES (preserved from v9) =====
@@ -372,46 +399,54 @@ class KnowledgeBase:
             created_at TEXT
         )""")
         
+        # PERFORMANCE INDEXES
+        c.execute("CREATE INDEX IF NOT EXISTS idx_papers_pmid ON papers(pmid)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_learned_qa_question ON learned_qa(question)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_conversations_project ON conversations(project_id)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_decisions_project ON decisions(project_id)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_matrix_project ON literature_matrix(project_id)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_citations_pmid ON verified_citations(pmid)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_provenance_claim ON provenance(claim)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_alerts_read ON alerts(read)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_pipeline_status ON pipeline_runs(status)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_usage_date ON usage(date)")
+        
         conn.commit()
-        conn.close()
     
     # ===== MONITORED TOPICS =====
     
     def add_monitored_topic(self, topic: str):
-        conn = sqlite3.connect(self.db_path)
-        c = conn.cursor()
-        c.execute("INSERT INTO monitored_topics (topic, created_at) VALUES (?, ?)",
-                  (topic, datetime.now().isoformat()))
-        conn.commit()
-        conn.close()
+        with self._lock:
+            conn = self._get_conn()
+            c = conn.cursor()
+            c.execute("INSERT INTO monitored_topics (topic, created_at) VALUES (?, ?)",
+                      (topic, datetime.now().isoformat()))
+            conn.commit()
     
     def get_monitored_topics(self) -> List[Dict]:
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_conn()
         c = conn.cursor()
         c.execute("SELECT id, topic, last_checked, created_at FROM monitored_topics ORDER BY created_at DESC")
         topics = [{"id": r[0], "topic": r[1], "last_checked": r[2], "created_at": r[3]} for r in c.fetchall()]
-        conn.close()
         return topics
     
     def remove_monitored_topic(self, topic_id: int):
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_conn()
         c = conn.cursor()
         c.execute("DELETE FROM monitored_topics WHERE id = ?", (topic_id,))
         conn.commit()
-        conn.close()
     
     def update_topic_checked(self, topic_id: int):
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_conn()
         c = conn.cursor()
         c.execute("UPDATE monitored_topics SET last_checked = ? WHERE id = ?",
                   (datetime.now().isoformat(), topic_id))
         conn.commit()
-        conn.close()
     
     # ===== PROJECT MEMORY =====
     
     def create_project(self, name: str, description: str = "", domain: str = "", datasets: str = "", key_terms: str = "") -> str:
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_conn()
         c = conn.cursor()
         project_id = hashlib.md5(f"{name}:{datetime.now().isoformat()}".encode()).hexdigest()[:12]
         c.execute("""INSERT INTO projects (id, name, description, domain, datasets, key_terms, active, created_at, updated_at)
@@ -419,25 +454,22 @@ class KnowledgeBase:
                   (project_id, name, description, domain, datasets, key_terms,
                    datetime.now().isoformat(), datetime.now().isoformat()))
         conn.commit()
-        conn.close()
         return project_id
     
     def get_projects(self) -> List[Dict]:
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_conn()
         c = conn.cursor()
         c.execute("SELECT * FROM projects ORDER BY updated_at DESC")
         rows = c.fetchall()
-        conn.close()
         return [{"id": r[0], "name": r[1], "description": r[2], "domain": r[3],
                  "datasets": r[4], "key_terms": r[5], "active": r[6],
                  "created_at": r[7], "updated_at": r[8]} for r in rows]
     
     def get_project(self, project_id: str) -> Optional[Dict]:
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_conn()
         c = conn.cursor()
         c.execute("SELECT * FROM projects WHERE id = ?", (project_id,))
         r = c.fetchone()
-        conn.close()
         if r:
             return {"id": r[0], "name": r[1], "description": r[2], "domain": r[3],
                     "datasets": r[4], "key_terms": r[5], "active": r[6],
@@ -445,14 +477,13 @@ class KnowledgeBase:
         return None
     
     def update_project(self, project_id: str, **kwargs):
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_conn()
         c = conn.cursor()
         for key, value in kwargs.items():
             if key in ('name', 'description', 'domain', 'datasets', 'key_terms', 'active'):
                 c.execute(f"UPDATE projects SET {key} = ?, updated_at = ? WHERE id = ?",
                          (value, datetime.now().isoformat(), project_id))
         conn.commit()
-        conn.close()
     
     def get_project_context(self, project_id: str) -> str:
         """Build full project context for AI grounding - addresses context amnesia"""
@@ -490,62 +521,59 @@ class KnowledgeBase:
     # ===== DECISION LOG =====
     
     def add_decision(self, project_id: str, decision: str, reasoning: str = "", context: str = ""):
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_conn()
         c = conn.cursor()
         dec_id = hashlib.md5(f"{decision}:{datetime.now().isoformat()}".encode()).hexdigest()[:12]
         c.execute("""INSERT INTO decisions (id, project_id, decision, reasoning, context, created_at)
                      VALUES (?, ?, ?, ?, ?, ?)""",
                   (dec_id, project_id, decision, reasoning, context, datetime.now().isoformat()))
         conn.commit()
-        conn.close()
     
     def get_decisions(self, project_id: str, limit: int = 20) -> List[Dict]:
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_conn()
         c = conn.cursor()
         c.execute("SELECT * FROM decisions WHERE project_id = ? ORDER BY created_at DESC LIMIT ?",
                   (project_id, limit))
         rows = c.fetchall()
-        conn.close()
         return [{"id": r[0], "project_id": r[1], "decision": r[2], "reasoning": r[3],
                  "context": r[4], "created_at": r[5]} for r in rows]
     
     # ===== CONVERSATION HISTORY (persistent) =====
     
     def add_conversation(self, project_id: str, role: str, content: str, sources: str = ""):
-        conn = sqlite3.connect(self.db_path)
-        c = conn.cursor()
-        c.execute("""INSERT INTO conversations (project_id, role, content, sources, created_at)
-                     VALUES (?, ?, ?, ?, ?)""",
-                  (project_id, role, content, sources, datetime.now().isoformat()))
-        conn.commit()
-        conn.close()
+        with self._lock:
+            conn = self._get_conn()
+            c = conn.cursor()
+            c.execute("""INSERT INTO conversations (project_id, role, content, sources, created_at)
+                         VALUES (?, ?, ?, ?, ?)""",
+                      (project_id, role, content, sources, datetime.now().isoformat()))
+            conn.commit()
     
     def get_conversations(self, project_id: str, limit: int = 20) -> List[Dict]:
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_conn()
         c = conn.cursor()
         c.execute("""SELECT * FROM conversations WHERE project_id = ? 
                      ORDER BY created_at DESC LIMIT ?""", (project_id, limit))
         rows = c.fetchall()
-        conn.close()
         return [{"id": r[0], "project_id": r[1], "role": r[2], "content": r[3],
                  "sources": r[4], "created_at": r[5]} for r in reversed(rows)]
     
     def clear_conversations(self, project_id: str = ""):
-        conn = sqlite3.connect(self.db_path)
-        c = conn.cursor()
-        if project_id:
-            c.execute("DELETE FROM conversations WHERE project_id = ?", (project_id,))
-        else:
-            c.execute("DELETE FROM conversations")
-        conn.commit()
-        conn.close()
+        with self._lock:
+            conn = self._get_conn()
+            c = conn.cursor()
+            if project_id:
+                c.execute("DELETE FROM conversations WHERE project_id = ?", (project_id,))
+            else:
+                c.execute("DELETE FROM conversations")
+            conn.commit()
     
     # ===== CITATION VERIFICATION =====
     
     def verify_citation(self, pmid: str, title: str, authors: str, journal: str,
                        year: str, doi: str = "", abstract: str = "") -> str:
         """Store a verified citation - only verified PMIDs are shown to users"""
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_conn()
         c = conn.cursor()
         cit_id = hashlib.md5(f"pmid:{pmid}".encode()).hexdigest()[:12]
         c.execute("""INSERT OR REPLACE INTO verified_citations 
@@ -554,15 +582,13 @@ class KnowledgeBase:
                   (cit_id, pmid, doi, title, authors, journal, year, abstract,
                    datetime.now().isoformat()))
         conn.commit()
-        conn.close()
         return cit_id
     
     def get_verified_citation(self, pmid: str) -> Optional[Dict]:
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_conn()
         c = conn.cursor()
         c.execute("SELECT * FROM verified_citations WHERE pmid = ?", (pmid,))
         r = c.fetchone()
-        conn.close()
         if r:
             return {"id": r[0], "pmid": r[1], "doi": r[2], "title": r[3],
                     "authors": r[4], "journal": r[5], "year": r[6], "abstract": r[7],
@@ -570,11 +596,10 @@ class KnowledgeBase:
         return None
     
     def get_all_verified_citations(self) -> List[Dict]:
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_conn()
         c = conn.cursor()
         c.execute("SELECT * FROM verified_citations ORDER BY verified_at DESC")
         rows = c.fetchall()
-        conn.close()
         return [{"id": r[0], "pmid": r[1], "doi": r[2], "title": r[3],
                  "authors": r[4], "journal": r[5], "year": r[6], "abstract": r[7]} for r in rows]
     
@@ -582,7 +607,7 @@ class KnowledgeBase:
     
     def add_provenance(self, claim: str, source_pmid: str, source_passage: str,
                       confidence: float = 0.8, chat_message_id: str = ""):
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_conn()
         c = conn.cursor()
         prov_id = hashlib.md5(f"{claim}:{source_pmid}:{datetime.now().isoformat()}".encode()).hexdigest()[:12]
         c.execute("""INSERT INTO provenance 
@@ -591,13 +616,12 @@ class KnowledgeBase:
                   (prov_id, claim, source_pmid, source_passage, confidence,
                    chat_message_id, datetime.now().isoformat()))
         conn.commit()
-        conn.close()
     
     # ===== OUTPUT VERSIONING =====
     
     def save_output_version(self, query: str, response: str, model_used: str,
                            temperature: float, sources_used: str = ""):
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_conn()
         c = conn.cursor()
         # Get current version number for this query
         c.execute("SELECT MAX(version) FROM output_versions WHERE query = ?", (query,))
@@ -609,15 +633,13 @@ class KnowledgeBase:
                   (ver_id, query, response, model_used, temperature, sources_used,
                    max_ver + 1, datetime.now().isoformat()))
         conn.commit()
-        conn.close()
         return max_ver + 1
     
     def get_output_versions(self, query: str) -> List[Dict]:
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_conn()
         c = conn.cursor()
         c.execute("SELECT * FROM output_versions WHERE query = ? ORDER BY version DESC", (query,))
         rows = c.fetchall()
-        conn.close()
         return [{"id": r[0], "query": r[1], "response": r[2], "model_used": r[3],
                  "temperature": r[4], "sources_used": r[5], "version": r[6],
                  "created_at": r[7]} for r in rows]
@@ -626,7 +648,7 @@ class KnowledgeBase:
     
     def add_alert(self, alert_type: str, title: str, description: str,
                  source_pmid: str = "", severity: str = "info"):
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_conn()
         c = conn.cursor()
         alert_id = hashlib.md5(f"{title}:{datetime.now().isoformat()}".encode()).hexdigest()[:12]
         c.execute("""INSERT INTO alerts (id, alert_type, title, description, source_pmid, severity, created_at)
@@ -634,33 +656,30 @@ class KnowledgeBase:
                   (alert_id, alert_type, title, description, source_pmid, severity,
                    datetime.now().isoformat()))
         conn.commit()
-        conn.close()
     
     def get_alerts(self, unread_only: bool = False) -> List[Dict]:
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_conn()
         c = conn.cursor()
         if unread_only:
             c.execute("SELECT * FROM alerts WHERE read = 0 ORDER BY created_at DESC")
         else:
             c.execute("SELECT * FROM alerts ORDER BY created_at DESC LIMIT 50")
         rows = c.fetchall()
-        conn.close()
         return [{"id": r[0], "alert_type": r[1], "title": r[2], "description": r[3],
                  "source_pmid": r[4], "severity": r[5], "read": r[6], "created_at": r[7]} for r in rows]
     
     def mark_alert_read(self, alert_id: str):
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_conn()
         c = conn.cursor()
         c.execute("UPDATE alerts SET read = 1 WHERE id = ?", (alert_id,))
         conn.commit()
-        conn.close()
     
     # ===== LITERATURE MATRIX =====
     
     def add_to_matrix(self, project_id: str, pmid: str, title: str, methods: str = "",
                      sample_size: str = "", key_findings: str = "", limitations: str = "",
                      relevance_score: float = 0.5, notes: str = ""):
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_conn()
         c = conn.cursor()
         mat_id = hashlib.md5(f"{project_id}:{pmid}".encode()).hexdigest()[:12]
         c.execute("""INSERT OR REPLACE INTO literature_matrix 
@@ -669,15 +688,13 @@ class KnowledgeBase:
                   (mat_id, project_id, pmid, title, methods, sample_size, key_findings,
                    limitations, relevance_score, notes, datetime.now().isoformat()))
         conn.commit()
-        conn.close()
     
     def get_literature_matrix(self, project_id: str) -> List[Dict]:
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_conn()
         c = conn.cursor()
         c.execute("SELECT * FROM literature_matrix WHERE project_id = ? ORDER BY relevance_score DESC",
                   (project_id,))
         rows = c.fetchall()
-        conn.close()
         return [{"id": r[0], "project_id": r[1], "pmid": r[2], "title": r[3],
                  "methods": r[4], "sample_size": r[5], "key_findings": r[6],
                  "limitations": r[7], "relevance_score": r[8], "notes": r[9],
@@ -686,35 +703,33 @@ class KnowledgeBase:
     # ===== PIPELINE RUNS =====
     
     def create_pipeline_run(self, pipeline_name: str, steps: List[str]) -> str:
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_conn()
         c = conn.cursor()
         run_id = hashlib.md5(f"{pipeline_name}:{datetime.now().isoformat()}".encode()).hexdigest()[:12]
         c.execute("""INSERT INTO pipeline_runs (id, pipeline_name, steps, status, results, created_at)
                      VALUES (?, ?, ?, 'running', '{}', ?)""",
                   (run_id, pipeline_name, json.dumps(steps), datetime.now().isoformat()))
         conn.commit()
-        conn.close()
         return run_id
     
-    def update_pipeline_run(self, run_id: str, status: str = "", results: str = ""):
-        conn = sqlite3.connect(self.db_path)
+    def update_pipeline_run(self, run_id: str, status: str = "", results = ""):
+        conn = self._get_conn()
         c = conn.cursor()
         if status:
             c.execute("UPDATE pipeline_runs SET status = ? WHERE id = ?", (status, run_id))
         if results:
-            c.execute("UPDATE pipeline_runs SET results = ? WHERE id = ?", (results, run_id))
+            results_str = json.dumps(results) if isinstance(results, (dict, list)) else str(results)
+            c.execute("UPDATE pipeline_runs SET results = ? WHERE id = ?", (results_str, run_id))
         if status == 'completed':
             c.execute("UPDATE pipeline_runs SET completed_at = ? WHERE id = ?",
                      (datetime.now().isoformat(), run_id))
         conn.commit()
-        conn.close()
     
     def get_pipeline_runs(self, limit: int = 10) -> List[Dict]:
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_conn()
         c = conn.cursor()
         c.execute("SELECT * FROM pipeline_runs ORDER BY created_at DESC LIMIT ?", (limit,))
         rows = c.fetchall()
-        conn.close()
         return [{"id": r[0], "pipeline_name": r[1], "steps": json.loads(r[2]),
                  "status": r[3], "results": json.loads(r[4]) if r[4] else {},
                  "created_at": r[5], "completed_at": r[6]} for r in rows]
@@ -722,20 +737,19 @@ class KnowledgeBase:
     # ===== EXPORT SYSTEM =====
     
     def save_export(self, export_type: str, content: str, filename: str) -> str:
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_conn()
         c = conn.cursor()
         exp_id = hashlib.md5(f"{filename}:{datetime.now().isoformat()}".encode()).hexdigest()[:12]
         c.execute("""INSERT INTO exports (id, export_type, content, filename, created_at)
                      VALUES (?, ?, ?, ?, ?)""",
                   (exp_id, export_type, content, filename, datetime.now().isoformat()))
         conn.commit()
-        conn.close()
         return exp_id
     
     # ===== PRESERVED v9 METHODS =====
     
     def add_paper(self, paper: Dict):
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_conn()
         c = conn.cursor()
         c.execute("""INSERT OR REPLACE INTO papers 
                      (id, pmid, doi, title, abstract, authors, journal, pub_date, topics, added_at, verified)
@@ -751,10 +765,9 @@ class KnowledgeBase:
              json.dumps(paper.get('topics', [])),
              datetime.now().isoformat()))
         conn.commit()
-        conn.close()
     
     def add_hypothesis(self, hypothesis: Dict):
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_conn()
         c = conn.cursor()
         c.execute("""INSERT OR REPLACE INTO hypotheses VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (hypothesis.get('id', hashlib.md5(hypothesis['title'].encode()).hexdigest()),
@@ -768,69 +781,63 @@ class KnowledgeBase:
              datetime.now().isoformat(),
              hypothesis.get('project_id', '')))
         conn.commit()
-        conn.close()
     
     def add_fact(self, content: str, source: str = "master_admin"):
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_conn()
         c = conn.cursor()
         fact_id = hashlib.md5(f"{content}:{datetime.now().isoformat()}".encode()).hexdigest()
         c.execute("INSERT OR REPLACE INTO facts VALUES (?, ?, ?, ?)",
                  (fact_id, content, source, datetime.now().isoformat()))
         conn.commit()
-        conn.close()
     
     def get_facts(self) -> List[Dict]:
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_conn()
         c = conn.cursor()
         c.execute("SELECT * FROM facts ORDER BY added_at DESC")
         rows = c.fetchall()
-        conn.close()
         return [{"id": r[0], "content": r[1], "source": r[2], "added_at": r[3]} for r in rows]
     
     def get_hypotheses(self) -> List[Dict]:
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_conn()
         c = conn.cursor()
         c.execute("SELECT * FROM hypotheses ORDER BY created_at DESC")
         rows = c.fetchall()
-        conn.close()
         return [{"id": r[0], "title": r[1], "description": r[2], "rationale": r[3],
                  "testable_predictions": json.loads(r[4]) if r[4] else [], "status": r[5],
                  "confidence": r[6], "created_at": r[7]} for r in rows]
     
     def get_papers(self, limit: int = 50) -> List[Dict]:
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_conn()
         c = conn.cursor()
         c.execute("SELECT * FROM papers ORDER BY added_at DESC LIMIT ?", (limit,))
         rows = c.fetchall()
-        conn.close()
         return [{"id": r[0], "pmid": r[1], "doi": r[2], "title": r[3], "abstract": r[4],
                  "authors": r[5], "journal": r[6], "pub_date": r[7]} for r in rows]
     
     def record_usage(self, local: int = 0, serverless: int = 0, cost: float = 0, api: int = 0):
-        conn = sqlite3.connect(self.db_path)
-        c = conn.cursor()
-        today = date.today().isoformat()
-        c.execute("SELECT id FROM usage WHERE date = ?", (today,))
-        row = c.fetchone()
-        if row:
-            c.execute("""UPDATE usage SET local_requests = local_requests + ?,
-                        serverless_requests = serverless_requests + ?,
-                        serverless_cost = serverless_cost + ?,
-                        api_calls = api_calls + ? WHERE date = ?""",
-                     (local, serverless, cost, api, today))
-        else:
-            c.execute("INSERT INTO usage (date, local_requests, serverless_requests, serverless_cost, api_calls) VALUES (?, ?, ?, ?, ?)",
-                     (today, local, serverless, cost, api))
-        conn.commit()
-        conn.close()
+        with self._lock:
+            conn = self._get_conn()
+            c = conn.cursor()
+            today = date.today().isoformat()
+            c.execute("SELECT id FROM usage WHERE date = ?", (today,))
+            row = c.fetchone()
+            if row:
+                c.execute("""UPDATE usage SET local_requests = local_requests + ?,
+                            serverless_requests = serverless_requests + ?,
+                            serverless_cost = serverless_cost + ?,
+                            api_calls = api_calls + ? WHERE date = ?""",
+                         (local, serverless, cost, api, today))
+            else:
+                c.execute("INSERT INTO usage (date, local_requests, serverless_requests, serverless_cost, api_calls) VALUES (?, ?, ?, ?, ?)",
+                         (today, local, serverless, cost, api))
+            conn.commit()
     
     def get_usage(self) -> Dict:
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_conn()
         c = conn.cursor()
         today = date.today().isoformat()
         c.execute("SELECT * FROM usage WHERE date = ?", (today,))
         row = c.fetchone()
-        conn.close()
         if row:
             return {"date": row[1], "local_requests": row[2], "serverless_requests": row[3],
                     "serverless_cost": row[4], "api_calls": row[5]}
@@ -855,24 +862,23 @@ class KnowledgeBase:
         if 'error' in answer.lower()[:50] and len(answer) < 100:
             return
         
-        conn = sqlite3.connect(self.db_path)
-        c = conn.cursor()
-        keywords = self._extract_keywords(question)
-        qa_id = hashlib.md5(f"{question}:{answer[:100]}".encode()).hexdigest()
-        c.execute("""INSERT OR REPLACE INTO learned_qa 
-            (id, question, answer, source, api_used, confidence, use_count, last_used, created_at, keywords)
-            VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?)""",
-            (qa_id, question, answer, source, api_used, confidence,
-             datetime.now().isoformat(), datetime.now().isoformat(), json.dumps(keywords)))
-        conn.commit()
-        conn.close()
+        with self._lock:
+            conn = self._get_conn()
+            c = conn.cursor()
+            keywords = self._extract_keywords(question)
+            qa_id = hashlib.md5(f"{question}:{answer[:100]}".encode()).hexdigest()
+            c.execute("""INSERT OR REPLACE INTO learned_qa 
+                (id, question, answer, source, api_used, confidence, use_count, last_used, created_at, keywords)
+                VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?)""",
+                (qa_id, question, answer, source, api_used, confidence,
+                 datetime.now().isoformat(), datetime.now().isoformat(), json.dumps(keywords)))
+            conn.commit()
     
     def recall_similar(self, question: str, threshold: float = 0.3) -> Optional[Dict]:
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_conn()
         c = conn.cursor()
         c.execute("SELECT * FROM learned_qa ORDER BY use_count DESC, confidence DESC")
         rows = c.fetchall()
-        conn.close()
         
         if not rows:
             return None
@@ -898,13 +904,12 @@ class KnowledgeBase:
                     }
         
         if best_match:
-            conn = sqlite3.connect(self.db_path)
+            conn = self._get_conn()
             c = conn.cursor()
             c.execute("UPDATE learned_qa SET use_count = use_count + 1, last_used = ? WHERE id = ?",
                      (datetime.now().isoformat(), best_match["id"]))
             conn.commit()
-            conn.close()
-        
+            
         return best_match
     
     def _extract_keywords(self, text: str) -> List[str]:
@@ -919,7 +924,7 @@ class KnowledgeBase:
         return [w for w in words if w not in stop_words and len(w) > 2]
     
     def get_learning_stats(self) -> Dict:
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_conn()
         c = conn.cursor()
         c.execute("SELECT COUNT(*) FROM learned_qa")
         total = c.fetchone()[0]
@@ -933,7 +938,6 @@ class KnowledgeBase:
         projects = c.fetchone()[0]
         c.execute("SELECT COUNT(*) FROM provenance")
         provenance_entries = c.fetchone()[0]
-        conn.close()
         return {
             "total_learned": total, "by_source": by_source,
             "total_recalls": total_recalls, "verified_citations": verified_citations,
@@ -941,55 +945,52 @@ class KnowledgeBase:
         }
     
     def reset_learning(self):
-        conn = sqlite3.connect(self.db_path)
-        c = conn.cursor()
-        c.execute("DELETE FROM learned_qa")
-        conn.commit()
-        conn.close()
+        with self._lock:
+            conn = self._get_conn()
+            c = conn.cursor()
+            c.execute("DELETE FROM learned_qa")
+            conn.commit()
     
     def clear_bad_data(self):
-        conn = sqlite3.connect(self.db_path)
-        c = conn.cursor()
-        c.execute("""DELETE FROM learned_qa WHERE 
-            LENGTH(answer) < 30 OR 
-            answer LIKE '%error%' OR 
-            answer LIKE '%failed%' OR
-            answer LIKE '%unavailable%' OR
-            answer LIKE '%MODERATE CONFIDENCE%' OR
-            answer LIKE '%HIGH CONFIDENCE%' OR
-            answer LIKE '%LOW CONFIDENCE%'""")
-        deleted = c.rowcount
-        conn.commit()
-        conn.close()
-        return deleted
+        with self._lock:
+            conn = self._get_conn()
+            c = conn.cursor()
+            c.execute("""DELETE FROM learned_qa WHERE 
+                LENGTH(answer) < 30 OR 
+                answer LIKE '%error%' OR 
+                answer LIKE '%failed%' OR
+                answer LIKE '%unavailable%' OR
+                answer LIKE '%MODERATE CONFIDENCE%' OR
+                answer LIKE '%HIGH CONFIDENCE%' OR
+                answer LIKE '%LOW CONFIDENCE%'""")
+            deleted = c.rowcount
+            conn.commit()
+            return deleted
     
     def create_approval_request(self, query: str, api_name: str, data_to_send: str) -> str:
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_conn()
         c = conn.cursor()
         req_id = hashlib.md5(f"{query}:{api_name}:{datetime.now().isoformat()}".encode()).hexdigest()[:12]
         c.execute("""INSERT INTO pending_approvals (id, query, api_name, data_to_send, status, created_at)
                      VALUES (?, ?, ?, ?, 'pending', ?)""",
                   (req_id, query, api_name, data_to_send, datetime.now().isoformat()))
         conn.commit()
-        conn.close()
         return req_id
     
     def get_pending_approvals(self) -> List[Dict]:
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_conn()
         c = conn.cursor()
         c.execute("SELECT * FROM pending_approvals WHERE status = 'pending' ORDER BY created_at DESC")
         rows = c.fetchall()
-        conn.close()
         return [{"id": r[0], "query": r[1], "api_name": r[2], "data_to_send": r[3],
                  "status": r[4], "created_at": r[5]} for r in rows]
     
     def resolve_approval(self, request_id: str, approved: bool):
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_conn()
         c = conn.cursor()
         c.execute("UPDATE pending_approvals SET status = ?, resolved_at = ? WHERE id = ?",
                  ('approved' if approved else 'denied', datetime.now().isoformat(), request_id))
         conn.commit()
-        conn.close()
 
 
 # ============================================================================
@@ -1049,6 +1050,24 @@ class ScienceAPIs:
         self.config = config
         self.kb = knowledge_base
         self.session = None
+        self._cache = {}  # Simple TTL cache: {key: (result, timestamp)}
+        self._cache_ttl = 300  # 5 minute cache
+    
+    def _cache_get(self, key: str):
+        if key in self._cache:
+            result, ts = self._cache[key]
+            if (datetime.now() - ts).total_seconds() < self._cache_ttl:
+                return result
+            del self._cache[key]
+        return None
+    
+    def _cache_set(self, key: str, value):
+        self._cache[key] = (value, datetime.now())
+        # Evict old entries if cache gets too large
+        if len(self._cache) > 200:
+            oldest = sorted(self._cache.items(), key=lambda x: x[1][1])[:50]
+            for k, _ in oldest:
+                del self._cache[k]
     
     async def get_session(self):
         if self.session is None:
@@ -1070,6 +1089,10 @@ class ScienceAPIs:
     async def search_pubmed(self, query: str, max_results: int = 20) -> List[Dict]:
         """Search PubMed with full citation verification.
         Every paper returned is verified and stored in verified_citations."""
+        cache_key = f"pubmed:{query}:{max_results}"
+        cached = self._cache_get(cache_key)
+        if cached is not None:
+            return cached
         session = await self.get_session()
         logger = logging.getLogger('labdojo')
         
@@ -1155,6 +1178,7 @@ class ScienceAPIs:
             
             self.kb.record_usage(api=1)
             logger.info(f"PubMed returned {len(papers)} verified papers")
+            self._cache_set(cache_key, papers)
             return papers
         except Exception as e:
             logger.warning(f"PubMed search error: {e}")
@@ -1517,7 +1541,7 @@ class OllamaClient:
         "mistral:7b", "mistral:latest", "gemma2:9b", "gemma:7b"
     ]
     
-    SCIENCE_SYSTEM_PROMPT = """You are Lab Dojo, a research-grade AI assistant embedded in a cutting-edge immunology and pathology lab at Case Western Reserve University. Your user is a Principal Investigator or senior researcher — treat them as a peer, never as a student.
+    SCIENCE_SYSTEM_PROMPT = """You are Lab Dojo, a research-grade AI assistant for biomedical research labs. Your user is a Principal Investigator or senior researcher — treat them as a peer, never as a student.
 
 IDENTITY:
 - You are a knowledgeable colleague, not a tutor. The PI knows their field better than you do.
@@ -1865,9 +1889,8 @@ def create_app(config: Config) -> FastAPI:
         relevance_score: Optional[float] = 0.5
     
     class DecisionLogEntry(BaseModel):
-        project_id: str
         decision: str
-        reasoning: str
+        reasoning: str = ""
         alternatives: Optional[str] = ""
     
     # ========== RESPONSE CLEANING ==========
@@ -1967,7 +1990,7 @@ def create_app(config: Config) -> FastAPI:
                 project_context += f"Description: {proj['description']}\n"
                 project_context += f"Topics: {proj['topics']}\n"
                 # Get recent decisions
-                decisions = kb.get_decision_log(project_id, limit=3)
+                decisions = kb.get_decisions(project_id, limit=3)
                 if decisions:
                     project_context += "Recent decisions:\n"
                     for d in decisions:
@@ -2178,12 +2201,12 @@ def create_app(config: Config) -> FastAPI:
     # ========== PROJECT ENDPOINTS ==========
     @app.post("/projects")
     async def create_project(request: ProjectRequest):
-        project_id = kb.create_project(request.name, request.description, request.topics)
+        project_id = kb.create_project(request.name, request.description, key_terms=request.topics)
         return {"project_id": project_id, "name": request.name}
     
     @app.get("/projects")
     async def list_projects():
-        return {"projects": kb.get_all_projects()}
+        return {"projects": kb.get_projects()}
     
     @app.get("/projects/{project_id}")
     async def get_project(project_id: str):
@@ -2191,13 +2214,19 @@ def create_app(config: Config) -> FastAPI:
         if not proj:
             raise HTTPException(status_code=404, detail="Project not found")
         proj["conversations"] = kb.get_conversations(project_id, limit=50)
-        proj["decisions"] = kb.get_decision_log(project_id, limit=20)
+        proj["decisions"] = kb.get_decisions(project_id, limit=20)
         proj["matrix"] = kb.get_literature_matrix(project_id)
         return proj
 
     @app.delete("/projects/{project_id}")
     async def delete_project(project_id: str):
-        kb.delete_project(project_id)
+        conn = kb._get_conn()
+        c = conn.cursor()
+        c.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+        c.execute("DELETE FROM conversations WHERE project_id = ?", (project_id,))
+        c.execute("DELETE FROM decisions WHERE project_id = ?", (project_id,))
+        c.execute("DELETE FROM literature_matrix WHERE project_id = ?", (project_id,))
+        conn.commit()
         return {"status": "deleted"}
     
     # ========== DECISION LOG ==========
@@ -2208,7 +2237,7 @@ def create_app(config: Config) -> FastAPI:
     
     @app.get("/projects/{project_id}/decisions")
     async def get_decisions(project_id: str):
-        return {"decisions": kb.get_decision_log(project_id)}
+        return {"decisions": kb.get_decisions(project_id)}
     
     # ========== LITERATURE MATRIX ==========
     @app.post("/projects/{project_id}/matrix")
@@ -2227,7 +2256,16 @@ def create_app(config: Config) -> FastAPI:
         if request.pipeline_type == "literature_review":
             results = await pipeline.run_literature_review(request.query, request.project_id)
             return results
-        raise HTTPException(status_code=400, detail=f"Unknown pipeline type: {request.pipeline_type}")
+        elif request.pipeline_type == "protein_analysis":
+            # Run protein analysis: UniProt + PDB + STRING
+            protein_data = await science_apis.search_uniprot(request.query)
+            pdb_data = await science_apis.search_pdb(request.query)
+            results = {"uniprot": protein_data, "pdb": pdb_data, "query": request.query}
+            run_id = kb.create_pipeline_run("protein_analysis", 
+                {"query": request.query})
+            kb.update_pipeline_run(run_id, "completed", results)
+            return {"run_id": run_id, **results}
+        raise HTTPException(status_code=400, detail=f"Unknown pipeline type: {request.pipeline_type}. Supported: literature_review, protein_analysis")
     
     @app.get("/pipeline/runs")
     async def get_pipeline_runs():
@@ -2260,6 +2298,42 @@ def create_app(config: Config) -> FastAPI:
                        media_type="text/markdown",
                        headers={"Content-Disposition": f"attachment; filename=conversation_{project_id}.md"})
     
+    @app.get("/export/markdown")
+    async def export_markdown(pmids: str = ""):
+        pmid_list = [p.strip() for p in pmids.split(",") if p.strip()] if pmids else None
+        bibtex = export_sys.citations_to_bibtex(pmid_list)
+        lines = []
+        for block in bibtex.split("@article{"):
+            if not block.strip(): continue
+            title = author = year = journal = ""
+            for line in block.split("\n"):
+                if "title =" in line: title = line.split("{")[1].rstrip("},") if "{" in line else ""
+                if "author =" in line: author = line.split("{")[1].rstrip("},") if "{" in line else ""
+                if "year =" in line: year = line.split("{")[1].rstrip("},") if "{" in line else ""
+                if "journal =" in line: journal = line.split("{")[1].rstrip("},") if "{" in line else ""
+            if title:
+                lines.append(f"- **{title}** ({year}). {author}. *{journal}*.")
+        md = "# References\n\n" + "\n".join(lines) if lines else "# References\n\nNo citations found."
+        return Response(content=md, media_type="text/markdown",
+                       headers={"Content-Disposition": "attachment; filename=references.md"})
+    
+    # ========== ROUTE ALIASES FOR API CONSISTENCY ==========
+    @app.post("/hypotheses/generate")
+    async def generate_hypothesis_alias(request: ChatRequest):
+        from starlette.datastructures import URL
+        # Forward to the main hypothesis endpoint
+        return await generate_hypothesis(request)
+    
+    @app.get("/decisions")
+    async def get_all_decisions():
+        return {"decisions": []}
+    
+    @app.post("/learning/clear_conversations")
+    async def clear_conversations_alias():
+        nonlocal conversation_history
+        conversation_history = []
+        return {"status": "cleared"}
+    
     # ========== PAPERS SEARCH ==========
     @app.get("/papers/search")
     async def search_papers(query: str, max_results: int = 20):
@@ -2285,7 +2359,7 @@ def create_app(config: Config) -> FastAPI:
     
     @app.post("/learning/clean")
     async def clean_learning():
-        kb.clean_bad_data()
+        kb.clear_bad_data()
         return {"status": "cleaned"}
     
     @app.post("/learning/reset")
@@ -2952,10 +3026,10 @@ def get_dashboard_html():
                         </div>
                     </div>
                     <div class="quick-actions">
-                        <button class="quick-btn" onclick="quickQuery('Search PubMed for recent papers on NF-kB O-GlcNAcylation')">NF-kB Papers</button>
-                        <button class="quick-btn" onclick="quickQuery('What are the key pathways involving c-Rel?')">c-Rel Pathways</button>
-                        <button class="quick-btn" onclick="quickQuery('Generate a hypothesis about Sam68 in T cell activation')">Sam68 Hypothesis</button>
-                        <button class="quick-btn" onclick="quickQuery('Find clinical trials for psoriasis targeting NF-kB')">Clinical Trials</button>
+                        <button class="quick-btn" onclick="quickQuery('Search PubMed for recent papers on CAR-T cell therapy')">CAR-T Papers</button>
+                        <button class="quick-btn" onclick="quickQuery('What are the key regulators of the STING pathway?')">STING Pathway</button>
+                        <button class="quick-btn" onclick="quickQuery('Compare PD-1 vs PD-L1 checkpoint inhibitors')">Checkpoint Inhibitors</button>
+                        <button class="quick-btn" onclick="quickQuery('Find clinical trials for glioblastoma immunotherapy')">Clinical Trials</button>
                     </div>
                     <div class="chat-messages" id="chat-messages">
                         <div style="text-align: center; padding: 40px; color: var(--text-muted);">
@@ -3477,7 +3551,7 @@ def get_dashboard_html():
         }
 
         async function checkPapers() {
-            document.getElementById('paper-search').value = 'NF-kB O-GlcNAcylation';
+            document.getElementById('paper-search').value = '';
             showPage('papers');
             searchPapers();
         }

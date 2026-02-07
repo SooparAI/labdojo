@@ -1,99 +1,76 @@
-# Lab Dojo v8 - Ready to Use!
+# Lab Dojo v10 - Quick Start Guide
 
-## ✅ Your Serverless Endpoint is LIVE
-
-Your Vast.ai serverless is already configured and ready:
-
-| Setting | Value |
-|---------|-------|
-| **Endpoint Name** | labdojo-qwen32b |
-| **Endpoint ID** | 11809 |
-| **Workergroup ID** | 16559 |
-| **GPU** | RTX 5090 |
-| **Cost** | $0.269/hour (only when active) |
-| **Idle Cost** | $0.00/hour |
-
-## 🚀 Start Lab Dojo Now
-
-### Mac
-```bash
-# Double-click LabDojo_Installer.command
-# OR in Terminal:
-./LabDojo_Installer.command
-```
+## Step 1: Install & Run
 
 ### Windows
-```
-Double-click LabDojo_Installer.bat
+Double-click `LabDojo_Installer.bat`
+
+### Mac
+Double-click `LabDojo_Installer.command`
+
+(If macOS blocks it: right-click → Open → click "Open")
+
+### Manual
+```bash
+pip install aiohttp fastapi uvicorn pydantic
+ollama pull llama3:8b
+python3 labdojo.py
 ```
 
 **Dashboard opens at:** http://localhost:8080
 
-## 🎯 What Happens When You Chat
+## Step 2: Configure AI Backend
 
-### Simple Questions → Local (FREE)
-- "What is 2+2?"
-- "Capital of France?"
-- Quick lookups
+Lab Dojo works with just Ollama (free, local). For more powerful models, configure additional backends in Settings:
 
-**Response time:** 2-5 seconds
-**Cost:** $0.00
-
-### Complex Questions → Serverless (Pay-per-use)
-- "Analyze this research paper..."
-- "Compare these methodologies..."
-- Long reasoning tasks
-
-**First request:** 60-90 seconds (cold start - workers spin up)
-**After that:** 3-5 seconds
-**Cost:** ~$0.0003 per request
-
-## 💰 Cost Control
-
-| Setting | Value |
+| Backend | Setup |
 |---------|-------|
+| **Ollama** (default) | Install Ollama, pull a model. Auto-detected. |
+| **Vast.ai Serverless** | Add API key + endpoint ID in Settings → Compute |
+| **OpenAI** | Add API key in Settings → API Keys |
+| **Anthropic** | Add API key in Settings → API Keys |
+
+## Step 3: Start Researching
+
+### Chat
+Ask science questions. Lab Dojo automatically searches PubMed, UniProt, PDB, and other databases to ground its answers with real citations.
+
+### Projects
+Create research projects to maintain persistent context across sessions. Add decision logs and literature matrices.
+
+### Papers
+Search PubMed directly. Export citations as BibTeX or RIS.
+
+### Pipelines
+Run multi-step workflows: literature reviews, protein analysis.
+
+### Monitor
+Track topics for new publications and get alerts.
+
+## How Routing Works
+
+| Question Type | Backend Used | Cost |
+|--------------|-------------|------|
+| Any question with Ollama available | Ollama (local) | Free |
+| Ollama unavailable, serverless configured | Vast.ai Serverless | ~$0.001/query |
+| Neither available, OpenAI key set | ChatGPT | Per-token |
+| No AI backend available | Raw API data returned | Free |
+
+## Cost Control
+
+| Setting | Default |
+|---------|---------|
 | Daily Budget | $5.00 |
 | When Exceeded | Routes to local only |
 | Reset | Midnight daily |
 
-**Typical daily cost:** $0.02 - $0.10
-
-## 📊 Your Serverless Settings (Optimal for Low Cost)
-
-```
-Minimum Workers: 0      ← No idle charges!
-Max Workers: 2          ← Enough for your usage
-Coldstart Ratio: 2x     ← Fast scale-down
-Target Utilization: 0.8 ← Efficient scaling
-```
-
-## 🔧 Files Included
+## Files Included
 
 | File | Purpose |
 |------|---------|
-| `labdojo.py` | Main application |
-| `LabDojo_Installer.command` | Mac installer |
-| `LabDojo_Installer.bat` | Windows installer |
-| `docker/` | Serverless container (already deployed!) |
-
-## ❓ FAQ
-
-### Q: Do I need to set up anything else?
-**A:** No! Your serverless endpoint is already live. Just run the installer.
-
-### Q: Why does the first request take so long?
-**A:** Cold start - workers spin up from 0. After that, it's fast (3-5 seconds).
-
-### Q: How do I check my spending?
-**A:** Dashboard shows "Today's Cost" in real-time.
-
-### Q: What if I exceed the daily budget?
-**A:** All requests automatically route to local Ollama (free).
-
-## 🎉 You're Ready!
-
-1. Run the installer
-2. Open http://localhost:8080
-3. Start chatting!
-
-**Enjoy Lab Dojo!** 🧪
+| `labdojo.py` | Main application (~3,800 lines) |
+| `LabDojo_Installer.bat` | Windows one-click launcher |
+| `LabDojo_Installer.command` | Mac one-click launcher |
+| `.env.example` | Environment variable template |
+| `docker/` | Dockerfile for serverless deployment |
+| `scripts/` | Serverless setup scripts |
