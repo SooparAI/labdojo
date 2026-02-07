@@ -51,7 +51,7 @@ import uvicorn
 class Config:
     """Lab Dojo configuration"""
     # Vast.ai Serverless
-    vastai_api_key: str = "3b891248bfa1eb4c0811be10a08afa3fa87765d5672a5150c4ec68f81f81cebf"
+    vastai_api_key: str = "c753c72326d37aa6a8dc9e0b50e175aac1b90faf773762110f62858fb1d5bced"
     vastai_api_base: str = "https://console.vast.ai/api/v0"
     serverless_endpoint: str = "labdojo-qwen32b"
     serverless_endpoint_id: int = 11809
@@ -1354,42 +1354,69 @@ class ServerlessClient:
     
     async def chat(self, prompt: str, system_prompt: str = "", max_tokens: int = 2048, temperature: float = 0.7) -> Tuple[str, float]:
         session = await self.get_session()
-        try:
-            headers = {"Authorization": f"Bearer {self.config.vastai_api_key}", "Content-Type": "application/json"}
-            
-            if not system_prompt:
-                system_prompt = "You are Lab Dojo, an expert research assistant for an immunology/pathology lab. Be SPECIFIC and DETAILED. Cite PMIDs and database IDs from verified data."
-            
-            route_payload = {
-                "endpoint_id": self.config.serverless_endpoint_id,
-                "request": {
-                    "model": "Qwen/Qwen2.5-32B-Instruct-AWQ",
-                    "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": prompt}
-                    ],
-                    "max_tokens": max_tokens,
-                    "temperature": temperature
-                }
+        headers = {"Authorization": f"Bearer {self.config.vastai_api_key}", "Content-Type": "application/json"}
+        
+        if not system_prompt:
+            system_prompt = "You are Lab Dojo, an expert research assistant for an immunology/pathology lab. Be SPECIFIC and DETAILED. Cite PMIDs and database IDs from verified data."
+        
+        route_payload = {
+            "endpoint_id": self.config.serverless_endpoint_id,
+            "request": {
+                "model": "Qwen/Qwen2.5-32B-Instruct-AWQ",
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt}
+                ],
+                "max_tokens": max_tokens,
+                "temperature": temperature
             }
-            
-            async with session.post("https://run.vast.ai/route/", headers=headers,
-                                   json=route_payload, timeout=aiohttp.ClientTimeout(total=120)) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    response_text = ""
-                    if "choices" in data:
-                        response_text = data["choices"][0].get("message", {}).get("content", "")
-                    elif "response" in data:
-                        response_text = data["response"]
-                    elif "output" in data:
-                        response_text = data["output"]
-                    cost = (4 / 3600) * self.config.serverless_cost_per_hour
-                    return response_text, cost
-                else:
-                    raise Exception(f"Serverless error {resp.status}")
-        except Exception as e:
-            raise Exception(f"Serverless error: {str(e)}")
+        }
+        
+        # Retry logic for cold starts (workers spinning up)
+        max_retries = 4
+        for attempt in range(max_retries):
+            try:
+                async with session.post("https://run.vast.ai/route/", headers=headers,
+                                       json=route_payload, timeout=aiohttp.ClientTimeout(total=120)) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        
+                        # Check if workers are still spinning up (cold start)
+                        if "status" in data and "total workers: 0" in str(data.get("status", "")):
+                            if attempt < max_retries - 1:
+                                logger.info(f"Serverless cold start - workers spinning up (attempt {attempt + 1}/{max_retries}), waiting 15s...")
+                                await asyncio.sleep(15)
+                                continue
+                            else:
+                                raise Exception("Serverless workers failed to start after retries")
+                        
+                        response_text = ""
+                        if "choices" in data:
+                            response_text = data["choices"][0].get("message", {}).get("content", "")
+                        elif "response" in data:
+                            response_text = data["response"]
+                        elif "output" in data:
+                            response_text = data["output"]
+                        
+                        if not response_text and "status" in data:
+                            raise Exception(f"Serverless returned status: {data['status']}")
+                        
+                        cost = (4 / 3600) * self.config.serverless_cost_per_hour
+                        return response_text, cost
+                    else:
+                        body = await resp.text()
+                        raise Exception(f"Serverless error {resp.status}: {body[:200]}")
+            except asyncio.TimeoutError:
+                if attempt < max_retries - 1:
+                    logger.warning(f"Serverless timeout (attempt {attempt + 1}), retrying...")
+                    continue
+                raise Exception("Serverless timeout after retries")
+            except Exception as e:
+                if "cold start" in str(e).lower() or "workers" in str(e).lower():
+                    if attempt < max_retries - 1:
+                        await asyncio.sleep(15)
+                        continue
+                raise Exception(f"Serverless error: {str(e)}")
 
 
 class ChatGPTClient:
