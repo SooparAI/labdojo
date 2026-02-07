@@ -1357,7 +1357,7 @@ class ServerlessClient:
         headers = {"Authorization": f"Bearer {self.config.vastai_api_key}", "Content-Type": "application/json"}
         
         if not system_prompt:
-            system_prompt = "You are Lab Dojo, an expert research assistant for an immunology/pathology lab. Be SPECIFIC and DETAILED. Cite PMIDs and database IDs from verified data."
+            system_prompt = "You are Lab Dojo, a research-grade AI for a cutting-edge immunology/pathology lab. The user is a PI — speak as a peer, never as a tutor. Be specific: gene names, PMIDs, UniProt IDs, pathway details. Never say 'consult an expert' or explain basics. Jump straight into the science."
         
         route_payload = {
             "endpoint_id": self.config.serverless_endpoint_id,
@@ -1517,21 +1517,29 @@ class OllamaClient:
         "mistral:7b", "mistral:latest", "gemma2:9b", "gemma:7b"
     ]
     
-    SCIENCE_SYSTEM_PROMPT = """You are Lab Dojo, an expert research assistant for an immunology and pathology lab at Case Western Reserve University. You specialize in NF-kB signaling, Sam68/KHDRBS1, immunometabolism, O-GlcNAcylation, T cell biology, and related topics.
+    SCIENCE_SYSTEM_PROMPT = """You are Lab Dojo, a research-grade AI assistant embedded in a cutting-edge immunology and pathology lab at Case Western Reserve University. Your user is a Principal Investigator or senior researcher — treat them as a peer, never as a student.
 
-CORE RULES:
-1. Be SPECIFIC and DETAILED. Scientists need actionable information, not vague summaries.
-2. When you receive VERIFIED DATA FROM DATABASES, use it directly. Cite PMIDs and database IDs.
-3. NEVER fabricate citations. If data was provided from APIs, reference it. If not, state what needs verification.
-4. Structure responses with clear sections using markdown headers.
-5. For follow-up questions, expand on the previous topic with MORE DEPTH.
-6. For protein/gene questions: provide gene names, UniProt IDs, known functions, key domains, pathways.
-7. For pathway questions: describe the signaling cascade, key regulators, disease relevance.
-8. Always suggest concrete next steps (experiments, databases to check, papers to read).
-9. Use markdown: **bold** for key terms, bullet points for lists, headers for sections.
+IDENTITY:
+- You are a knowledgeable colleague, not a tutor. The PI knows their field better than you do.
+- Never explain basic concepts unless explicitly asked. Skip textbook introductions.
+- Never say "you should form a hypothesis first" or "consult a professional/expert" — the user IS the expert.
+- Never be patronizing, hedging, or overly cautious. Be direct and substantive.
+- Match the technical depth of the question. If they ask about a specific kinase, discuss phosphorylation sites and substrates, not "what is a kinase."
+
+RESPONSE STYLE:
+1. Jump straight into the science. No preamble, no "Great question!" filler.
+2. Be SPECIFIC: gene names, UniProt IDs, PMIDs, IC50 values, domain structures, pathway nodes — concrete data.
+3. When VERIFIED DATA FROM DATABASES is provided, synthesize it intelligently. Cite PMIDs from that data.
+4. NEVER fabricate citations or PMIDs. If data wasn't provided, say what's unknown or needs a database check.
+5. For proteins: domains, post-translational modifications, interaction partners, structural data.
+6. For pathways: upstream regulators, downstream effectors, crosstalk, disease-relevant mutations.
+7. For experimental questions: suggest specific approaches with controls, expected outcomes, and caveats a PI would care about (not generic "do a Western blot").
+8. Highlight contradictions in the literature, open questions, and where the field is moving.
+9. Use markdown: **bold** for key terms, headers for sections, tables for comparisons.
 10. NEVER start with confidence tags like [HIGH CONFIDENCE] or similar prefixes.
-11. NEVER include "Sources to verify:" sections.
-12. When citing papers, ONLY cite PMIDs that appear in the VERIFIED DATA section. Never invent PMIDs."""
+11. NEVER include "Sources to verify:" sections or "consult an expert" disclaimers.
+12. When citing papers, ONLY cite PMIDs from the VERIFIED DATA section. Never invent PMIDs.
+13. If you don't know something, say so directly — "This isn't well-characterized" or "No data in the provided results" — don't deflect to generic advice."""
     
     def __init__(self, config: Config):
         self.config = config
@@ -1864,27 +1872,55 @@ def create_app(config: Config) -> FastAPI:
     
     # ========== RESPONSE CLEANING ==========
     def clean_response(text: str) -> str:
-        """Strip confidence tags and artifacts from AI responses"""
+        """Strip confidence tags, condescending patterns, and artifacts from AI responses"""
         if not text:
             return text
         # Remove confidence prefixes
         for tag in ['[HIGH CONFIDENCE]', '[MODERATE CONFIDENCE]', '[LOW CONFIDENCE]',
                      '[HIGH]', '[MODERATE]', '[LOW]', '[CONFIDENCE:', 'CONFIDENCE:']:
             text = text.replace(tag, '')
-        # Remove "Sources to verify:" lines
+        # Remove condescending filler lines
         lines = text.split('\n')
         cleaned = []
         skip = False
+        condescending_starts = [
+            'sources to verify:', '*sources to verify',
+            'please consult', 'i recommend consulting',
+            'it is important to note that', 'it\'s important to note',
+            'it is essential to', 'it\'s essential to',
+            'please note that this', 'disclaimer:',
+            'note: this information', 'note: always consult',
+            'remember to always', 'as always, consult',
+            'i would recommend speaking', 'contact a professional',
+            'seek professional', 'consult with a qualified',
+        ]
         for line in lines:
             lower = line.lower().strip()
-            if lower.startswith('sources to verify:') or lower.startswith('*sources to verify'):
+            if any(lower.startswith(p) for p in condescending_starts):
                 skip = True
                 continue
             if skip and (line.startswith('- [') or line.startswith('* [')):
                 continue
             skip = False
             cleaned.append(line)
-        return '\n'.join(cleaned).strip()
+        text = '\n'.join(cleaned).strip()
+        # Remove inline condescending phrases
+        condescending_phrases = [
+            'However, it\'s important to consult with experts in the field.',
+            'Please consult a professional for expert advice.',
+            'I recommend consulting with a qualified professional.',
+            'It is advisable to seek professional guidance.',
+            'Always consult with your research advisor.',
+            'Contact professionals for expert advice.',
+            'You should consult an expert.',
+            'We must first form a hypothesis.',
+        ]
+        for phrase in condescending_phrases:
+            text = text.replace(phrase, '')
+        # Clean up any double newlines from removals
+        while '\n\n\n' in text:
+            text = text.replace('\n\n\n', '\n\n')
+        return text.strip()
     
     def extract_search_terms(prompt: str) -> str:
         """Extract meaningful search terms from a natural language question"""
@@ -2027,9 +2063,9 @@ def create_app(config: Config) -> FastAPI:
         # ========== BUILD PROMPT ==========
         # Verbosity instruction
         verbosity_instructions = {
-            "concise": "Respond in 2-3 sentences maximum. Be direct and specific.",
-            "detailed": "Provide a detailed response with sections and citations. 2-4 paragraphs.",
-            "comprehensive": "Provide an exhaustive, comprehensive analysis. Cover all angles, cite all sources, suggest experiments and next steps. No length limit."
+            "concise": "2-3 sentences. Data and conclusions only, no background.",
+            "detailed": "Detailed response with sections, citations, and mechanistic depth. 2-4 paragraphs.",
+            "comprehensive": "Exhaustive analysis: full mechanistic detail, all relevant citations, contradictions in the literature, open questions, and specific experimental approaches. No length limit."
         }
         verbosity_note = verbosity_instructions.get(verbosity, verbosity_instructions["detailed"])
         
@@ -2043,7 +2079,7 @@ def create_app(config: Config) -> FastAPI:
         full_prompt += f"VERBOSITY: {verbosity_note}\n\n"
         full_prompt += f"USER QUESTION: {prompt}"
         if api_context:
-            full_prompt += "\n\nProvide an accurate response grounded in the above data. ONLY cite PMIDs that appear in the VERIFIED DATA section. Be specific and useful."
+            full_prompt += "\n\nGround your response in the above data. ONLY cite PMIDs from the VERIFIED DATA. Synthesize, don't summarize. The user is a PI — skip basics, go deep."
         
         # ========== AI BACKEND CHAIN ==========
         response = ""
@@ -2106,7 +2142,7 @@ def create_app(config: Config) -> FastAPI:
         # 5. API data only fallback
         if not response or not response.strip():
             if api_context:
-                response = f"**I found data from scientific databases but couldn't reach an AI model for analysis:**\n\n{api_context}\n\n*Connect Ollama locally or add an API key in Settings for AI-powered analysis.*"
+                response = f"**Raw database results** (no AI model connected for synthesis):\n\n{api_context}"
                 route_info = "api-data-only"
             else:
                 raise HTTPException(status_code=503, detail="All AI backends unavailable. Install Ollama locally, or add an OpenAI/Claude API key in Settings.")
@@ -2343,17 +2379,19 @@ def create_app(config: Config) -> FastAPI:
     # ========== HYPOTHESIS GENERATION ==========
     @app.post("/hypothesis")
     async def generate_hypothesis(request: ChatRequest):
-        prompt = f"""Based on the following research context, generate a novel, testable hypothesis:
+        prompt = f"""The PI is exploring the following research direction. Generate a sharp, mechanistically-grounded hypothesis they can test:
 
-RESEARCH QUESTION: {request.message}
+RESEARCH DIRECTION: {request.message}
 
-Generate:
-1. A clear, specific hypothesis statement
-2. Rationale based on existing literature
-3. Predicted outcomes
-4. Suggested experimental approach
-5. Potential confounds to address
-6. Expected timeline and resources"""
+Provide:
+1. A precise, mechanistic hypothesis (not vague — specify the molecular players, the proposed interaction, and the predicted outcome)
+2. Mechanistic rationale grounded in known biology (cite relevant pathways, domains, modifications)
+3. Testable predictions with expected results (what would confirm vs. refute)
+4. Experimental strategy with specific assays, controls, and readouts a well-equipped lab would use
+5. Key confounds and how to control for them
+6. What would make this high-impact vs. incremental
+
+Do NOT explain what a hypothesis is. Do NOT suggest "consulting the literature" — the PI has already done that. Be direct and specific."""
         
         # Try Ollama first
         response = ""
