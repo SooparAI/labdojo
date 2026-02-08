@@ -2,7 +2,7 @@
 
 An open-source research workstation that connects 20 free science APIs to local AI models. Built for principal investigators and senior researchers who need grounded, citation-verified answers without sending data to the cloud.
 
-**Lab Dojo Pathology v0.1.0** — Released February 2026 by [JuiceVendor Labs Inc.](https://labdojo.org)
+**Lab Dojo Pathology v0.1.1** — Released February 2026 by [JuiceVendor Labs Inc.](https://labdojo.org)
 
 ## Quick Start
 
@@ -62,7 +62,7 @@ Backends are tried in order: Ollama → Serverless → OpenAI → Anthropic. If 
 
 ## Architecture
 
-Lab Dojo is a single Python file (~2,500 lines) with no external database dependencies:
+Lab Dojo is a single Python file (~2,750 lines) with no external database dependencies:
 
 ```
 labdojo.py
@@ -72,7 +72,9 @@ labdojo.py
 │   ├── Verified Citations, Provenance
 │   ├── Pipeline Runs, Decision Logs
 │   └── Monitored Topics, Alerts
-├── ScienceAPIs (20 databases, async, cached)
+├── ScienceAPIs (20 databases, async parallel, cached)
+├── Intent Classifier (casual vs research routing)
+├── Conversation Memory (10-turn context window)
 ├── AI Clients (4 backends with automatic fallback)
 ├── Export System (BibTeX, RIS, Markdown)
 ├── Pipeline Engine (multi-step workflows)

@@ -1,6 +1,5 @@
-#!/usr/bin/env python3
 """
-Lab Dojo Pathology v0.1.0
+Lab Dojo Pathology v0.1.1
 AI-powered research workstation for pathology laboratories.
 
 Copyright (c) 2025-2026 JuiceVendor Labs Inc.
@@ -10,7 +9,7 @@ Requires: Python 3.10+, aiohttp, fastapi, uvicorn, pydantic
 Optional: Ollama (local LLM), Vast.ai serverless, OpenAI/Anthropic keys
 """
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 __author__ = "JuiceVendor Labs Inc."
 __license__ = "MIT"
 
@@ -46,6 +45,7 @@ from pydantic import BaseModel
 _DEFAULT_CONFIG_DIR = Path.home() / ".labdojo"
 _DB_FILENAME = "labdojo.db"
 _CONFIG_FILENAME = "config.json"
+_SECRETS_FILENAME = "secrets.json"
 
 _SENSITIVE_KEYS = frozenset({
     "vastai_api_key", "openai_api_key", "anthropic_api_key", "ncbi_api_key",
@@ -64,6 +64,7 @@ class Config:
     openai_api_key: str = ""
     openai_model: str = "gpt-4o-mini"
     anthropic_api_key: str = ""
+    anthropic_model: str = "claude-3-haiku-20240307"
     ncbi_api_key: str = ""
     daily_budget: float = 5.0
     verbosity: str = "detailed"
@@ -79,6 +80,31 @@ class Config:
             env_val = os.environ.get(env_key, "")
             if env_val and not getattr(self, attr):
                 setattr(self, attr, env_val)
+
+        self._load_secrets()
+
+    def _load_secrets(self):
+        path = Path(self.config_dir) / _SECRETS_FILENAME
+        if path.exists():
+            try:
+                with open(path) as fh:
+                    secrets = json.load(fh)
+                for key in _SENSITIVE_KEYS:
+                    if key in secrets and secrets[key] and not getattr(self, key):
+                        setattr(self, key, secrets[key])
+            except Exception:
+                pass
+
+    def _save_secrets(self):
+        Path(self.config_dir).mkdir(parents=True, exist_ok=True)
+        secrets = {k: getattr(self, k) for k in _SENSITIVE_KEYS if getattr(self, k, "")}
+        path = Path(self.config_dir) / _SECRETS_FILENAME
+        with open(path, "w") as fh:
+            json.dump(secrets, fh, indent=2)
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
 
     @classmethod
     def load(cls) -> "Config":
@@ -97,6 +123,7 @@ class Config:
         data = {k: v for k, v in asdict(self).items() if k not in _SENSITIVE_KEYS}
         with open(Path(self.config_dir) / _CONFIG_FILENAME, "w") as fh:
             json.dump(data, fh, indent=2)
+        self._save_secrets()
 
 
 def setup_logging(config: Config) -> logging.Logger:
@@ -260,7 +287,12 @@ class KnowledgeBase:
             )
             conn.commit()
 
-    def recall_similar(self, question: str, threshold: float = 0.7) -> Optional[dict]:
+    def recall_similar(self, question: str, threshold: float = 0.85) -> Optional[dict]:
+        """Find a previously answered question that closely matches.
+
+        Returns a dict with keys: question, answer, source, api_used, confidence.
+        Returns None if no match exceeds the threshold.
+        """
         conn = self._get_conn()
         rows = conn.execute(
             "SELECT question, answer, source, api_used, confidence FROM learned_qa "
@@ -374,7 +406,8 @@ class KnowledgeBase:
         with self._lock:
             conn = self._get_conn()
             for tbl in ("projects", "conversations", "decisions", "literature_matrix"):
-                conn.execute(f"DELETE FROM {tbl} WHERE {'id' if tbl == 'projects' else 'project_id'} = ?", (pid,))
+                col = "id" if tbl == "projects" else "project_id"
+                conn.execute(f"DELETE FROM {tbl} WHERE {col} = ?", (pid,))
             conn.commit()
 
     # -- Decisions --
@@ -542,6 +575,63 @@ class KnowledgeBase:
 
 
 # ---------------------------------------------------------------------------
+# Intent Classification (casual vs research)
+# ---------------------------------------------------------------------------
+
+_CASUAL_PATTERNS = [
+    r"^(hi|hello|hey|howdy|greetings|yo|sup|hola|good\s*(morning|afternoon|evening|day))(\s+\w+)?[\s!.,?]*$",
+    r"^(thanks|thank\s*you|thx|ty|cheers|appreciated|great|awesome|cool|nice|ok|okay|got\s*it|understood)[\s!.,?]*$",
+    r"^(bye|goodbye|see\s*you|later|cya|take\s*care|peace)[\s!.,?]*$",
+    r"^(what\s*(can|do)\s*you\s*do|help|how\s*do\s*(i|you)\s*use|what\s*is\s*this|who\s*are\s*you|what\s*are\s*you)[\s?!.,]*$",
+    r"^(test|testing|ping|are\s*you\s*(there|working|alive|online))[\s?!.,]*$",
+    r"^(how\s*are\s*you|how('s|\s*is)\s*it\s*going|what('s|\s*is)\s*up)[\s?!.,]*$",
+]
+
+_CASUAL_RESPONSES = {
+    "greeting": "Welcome to Lab Dojo. I am your research assistant with access to 20 biomedical databases including PubMed, UniProt, PDB, ChEMBL, and more. Ask me any research question and I will ground my response in real data with PMID citations. For example, try asking about a specific protein, pathway, drug target, or gene.",
+    "thanks": "You are welcome. Let me know if you have another question.",
+    "farewell": "Take care. Your conversation history is saved locally.",
+    "help": "Lab Dojo connects a local AI model to 20 free biomedical APIs. You can:\n\n- **Ask research questions** in the Chat tab (grounded in PubMed, UniProt, PDB, etc.)\n- **Search papers** in the Papers tab with BibTeX/RIS export\n- **Run pipelines** for literature review, protein analysis, drug/target profiling, pathway analysis, or cancer genomics\n- **Create projects** to organize research context and decisions\n- **Monitor topics** for new publications\n\nAll data stays on your machine. No cloud dependency.",
+    "test": "Lab Dojo is running. All systems operational.",
+    "meta": "I am Lab Dojo, a research workstation built for principal investigators and research labs. I run locally on your machine with access to 20 biomedical databases. Ask me a research question to get started.",
+}
+
+
+def classify_intent(message: str) -> tuple[str, str]:
+    """Classify whether a message is casual or a research query.
+
+    Returns (intent_type, response) where intent_type is 'casual' or 'research'.
+    For casual messages, response contains the appropriate reply.
+    For research messages, response is empty.
+    """
+    msg = message.strip()
+    if len(msg) < 3:
+        return "casual", _CASUAL_RESPONSES["greeting"]
+
+    msg_lower = msg.lower().strip()
+
+    for pattern in _CASUAL_PATTERNS:
+        if re.match(pattern, msg_lower, re.IGNORECASE):
+            if re.match(r"^(hi|hello|hey|howdy|greetings|yo|sup|hola|good\s*(morning|afternoon|evening|day))", msg_lower):
+                return "casual", _CASUAL_RESPONSES["greeting"]
+            elif re.match(r"^(thanks|thank|thx|ty|cheers|appreciated|great|awesome|cool|nice|ok|okay|got\s*it|understood)", msg_lower):
+                return "casual", _CASUAL_RESPONSES["thanks"]
+            elif re.match(r"^(bye|goodbye|see\s*you|later|cya|take\s*care|peace)", msg_lower):
+                return "casual", _CASUAL_RESPONSES["farewell"]
+            elif re.match(r"^(what\s*(can|do)\s*you\s*do|help|how\s*do)", msg_lower):
+                return "casual", _CASUAL_RESPONSES["help"]
+            elif re.match(r"^(who\s*are\s*you|what\s*are\s*you|what\s*is\s*this)", msg_lower):
+                return "casual", _CASUAL_RESPONSES["meta"]
+            elif re.match(r"^(test|testing|ping|are\s*you)", msg_lower):
+                return "casual", _CASUAL_RESPONSES["test"]
+            elif re.match(r"^(how\s*are\s*you|how('s|\s*is)\s*it)", msg_lower):
+                return "casual", _CASUAL_RESPONSES["meta"]
+            return "casual", _CASUAL_RESPONSES["greeting"]
+
+    return "research", ""
+
+
+# ---------------------------------------------------------------------------
 # Science API Gateway  (20 databases, zero keys required)
 # ---------------------------------------------------------------------------
 
@@ -597,6 +687,17 @@ class ScienceAPIs:
         self.logger = logging.getLogger("labdojo.api")
         self._cache: dict = {}
         self._cache_ttl = 300
+        self._session: Optional[aiohttp.ClientSession] = None
+
+    async def _get_session(self) -> aiohttp.ClientSession:
+        if self._session is None or self._session.closed:
+            timeout = aiohttp.ClientTimeout(total=15)
+            self._session = aiohttp.ClientSession(timeout=timeout)
+        return self._session
+
+    async def close(self):
+        if self._session and not self._session.closed:
+            await self._session.close()
 
     def _cache_key(self, method: str, query: str) -> str:
         return hashlib.md5(f"{method}:{query}".encode()).hexdigest()
@@ -646,22 +747,29 @@ class ScienceAPIs:
         }
 
     async def fetch_grounding_data(self, question: str) -> tuple[str, list[str]]:
-        """Fetch data from relevant APIs and return (context_string, sources_list)."""
+        """Fetch data from relevant APIs in parallel and return (context_string, sources_list)."""
         api_ids = self.get_apis_for_question(question)
         self.logger.info(f"Routing to APIs: {api_ids}")
-        context_parts = []
-        sources = []
         search_terms = self._extract_search_terms(question)
 
-        for api_id in api_ids:
+        async def _query_one(api_id: str) -> tuple[str, str]:
             try:
                 result = await self._query_api(api_id, search_terms, question)
                 if result:
-                    context_parts.append(result)
-                    sources.append(_API_CATALOG[api_id]["name"])
                     self.kb.record_usage(api=1)
+                    return api_id, result
             except Exception as exc:
                 self.logger.debug(f"{api_id} query failed: {exc}")
+            return api_id, ""
+
+        results = await asyncio.gather(*[_query_one(aid) for aid in api_ids])
+
+        context_parts = []
+        sources = []
+        for api_id, result in results:
+            if result:
+                context_parts.append(result)
+                sources.append(_API_CATALOG[api_id]["name"])
 
         return "\n\n".join(context_parts), sources
 
@@ -721,27 +829,27 @@ class ScienceAPIs:
     async def _http_get(self, url: str, params: dict = None,
                         headers: dict = None, timeout: int = 15) -> dict | str | None:
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, params=params, headers=headers,
-                                       timeout=aiohttp.ClientTimeout(total=timeout)) as resp:
-                    if resp.status != 200:
-                        return None
-                    ct = resp.content_type or ""
-                    if "json" in ct:
-                        return await resp.json()
-                    return await resp.text()
+            session = await self._get_session()
+            async with session.get(url, params=params, headers=headers,
+                                   timeout=aiohttp.ClientTimeout(total=timeout)) as resp:
+                if resp.status != 200:
+                    return None
+                ct = resp.content_type or ""
+                if "json" in ct:
+                    return await resp.json()
+                return await resp.text()
         except Exception:
             return None
 
     async def _http_post(self, url: str, json_data: dict = None,
                          headers: dict = None, timeout: int = 15) -> dict | None:
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, json=json_data, headers=headers,
-                                        timeout=aiohttp.ClientTimeout(total=timeout)) as resp:
-                    if resp.status != 200:
-                        return None
-                    return await resp.json()
+            session = await self._get_session()
+            async with session.post(url, json=json_data, headers=headers,
+                                    timeout=aiohttp.ClientTimeout(total=timeout)) as resp:
+                if resp.status != 200:
+                    return None
+                return await resp.json()
         except Exception:
             return None
 
@@ -867,7 +975,7 @@ class ScienceAPIs:
         data = await self._http_get(
             "https://api.openalex.org/works",
             params={"search": terms, "per_page": "5", "sort": "relevance_score:desc"},
-            headers={"User-Agent": "LabDojo/0.1.0 (mailto:dev@juicevendorlabs.com)"})
+            headers={"User-Agent": "LabDojo/0.1.1 (mailto:dev@juicevendorlabs.com)"})
         if not data or not isinstance(data, dict):
             return ""
         results = data.get("results", [])
@@ -999,21 +1107,27 @@ class ScienceAPIs:
             cid = m.get("molecule_chembl_id", "")
             name = m.get("pref_name", "") or ""
             mtype = m.get("molecule_type", "")
-            lines.append(f"[{cid}] {name} ({mtype})")
+            phase = m.get("max_phase", "")
+            lines.append(f"[{cid}] {name} (type:{mtype}, phase:{phase})")
         return "CHEMBL:\n" + "\n".join(lines)
 
     # -- PubChem --
 
     async def _search_pubchem(self, terms: str) -> str:
+        first_term = terms.split()[0] if terms.split() else terms
         data = await self._http_get(
-            f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/{terms.split()[0]}/property/MolecularFormula,MolecularWeight,IUPACName/JSON")
+            f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/{first_term}/property/MolecularFormula,MolecularWeight,IUPACName/JSON")
         if not data or not isinstance(data, dict):
             return ""
         props = data.get("PropertyTable", {}).get("Properties", [])
         if not props:
             return ""
         p = props[0]
-        return f"PUBCHEM: CID={p.get('CID', '')} Formula={p.get('MolecularFormula', '')} MW={p.get('MolecularWeight', '')} IUPAC={p.get('IUPACName', '')}"
+        cid = p.get("CID", "")
+        formula = p.get("MolecularFormula", "")
+        weight = p.get("MolecularWeight", "")
+        iupac = p.get("IUPACName", "")
+        return f"PUBCHEM: CID:{cid} {iupac} (Formula:{formula}, MW:{weight})"
 
     # -- Gene Ontology --
 
@@ -1030,7 +1144,7 @@ class ScienceAPIs:
         for d in docs[:5]:
             go_id = d.get("id", "")
             label = d.get("label", "")
-            cat = d.get("category", [""])[0] if d.get("category") else ""
+            cat = d.get("category", "")
             lines.append(f"[{go_id}] {label} ({cat})")
         return "GENE ONTOLOGY:\n" + "\n".join(lines)
 
@@ -1039,7 +1153,7 @@ class ScienceAPIs:
     async def _search_reactome(self, terms: str) -> str:
         data = await self._http_get(
             "https://reactome.org/ContentService/search/query",
-            params={"query": terms, "types": "Pathway", "cluster": "true"})
+            params={"query": terms, "species": "Homo sapiens", "types": "Pathway", "cluster": "true"})
         if not data or not isinstance(data, dict):
             return ""
         results = data.get("results", [])
@@ -1048,10 +1162,9 @@ class ScienceAPIs:
         lines = []
         for group in results[:2]:
             for entry in group.get("entries", [])[:3]:
-                name = entry.get("name", "")
                 st_id = entry.get("stId", "")
-                species = entry.get("species", [""])[0] if entry.get("species") else ""
-                lines.append(f"[{st_id}] {name} ({species})")
+                name = entry.get("name", "")
+                lines.append(f"[{st_id}] {name}")
         return "REACTOME PATHWAYS:\n" + "\n".join(lines) if lines else ""
 
     # -- STRING --
@@ -1063,12 +1176,14 @@ class ScienceAPIs:
             params={"identifiers": first_term, "species": "9606", "limit": "5"})
         if not data or not isinstance(data, list):
             return ""
+        if not data:
+            return ""
         lines = []
         seen = set()
-        for item in data[:10]:
-            a = item.get("preferredName_A", "")
-            b = item.get("preferredName_B", "")
-            score = item.get("score", 0)
+        for interaction in data[:10]:
+            a = interaction.get("preferredName_A", "")
+            b = interaction.get("preferredName_B", "")
+            score = interaction.get("score", 0)
             pair = tuple(sorted([a, b]))
             if pair not in seen:
                 seen.add(pair)
@@ -1078,7 +1193,8 @@ class ScienceAPIs:
     # -- KEGG --
 
     async def _search_kegg(self, terms: str) -> str:
-        text = await self._http_get(f"https://rest.kegg.jp/find/pathway/{terms.split()[0]}")
+        first_term = terms.split()[0] if terms.split() else terms
+        text = await self._http_get(f"https://rest.kegg.jp/find/pathway/{first_term}")
         if not text or not isinstance(text, str):
             return ""
         lines = []
@@ -1227,15 +1343,24 @@ class OllamaClient:
             self.available = False
             return False
 
-    async def chat(self, prompt: str, system: str = "", temperature: float = 0.7) -> str:
+    async def chat(self, prompt: str, system: str = "",
+                   temperature: float = 0.7, messages: list = None) -> str:
         if not self.available:
             await self.check_available()
         if not self.available:
             return ""
-        messages = []
-        if system:
-            messages.append({"role": "system", "content": system})
-        messages.append({"role": "user", "content": prompt})
+
+        if messages is None:
+            messages = []
+            if system:
+                messages.append({"role": "system", "content": system})
+            messages.append({"role": "user", "content": prompt})
+        else:
+            msg_list = []
+            if system:
+                msg_list.append({"role": "system", "content": system})
+            msg_list.extend(messages)
+            messages = msg_list
 
         try:
             payload = {"model": self.model, "messages": messages,
@@ -1262,17 +1387,27 @@ class ServerlessClient:
         self.config = config
         self.logger = logging.getLogger("labdojo.serverless")
 
-    async def chat(self, prompt: str, system: str = "", temperature: float = 0.7) -> str:
+    async def chat(self, prompt: str, system: str = "",
+                   temperature: float = 0.7, messages: list = None) -> str:
         if not self.config.vastai_api_key or not self.config.serverless_endpoint_id:
             return ""
         endpoint = self.config.serverless_endpoint_id
         url = f"https://run.vast.ai/route/{endpoint}/v1/chat/completions"
         headers = {"Authorization": f"Bearer {self.config.vastai_api_key}",
                    "Content-Type": "application/json"}
-        messages = []
-        if system:
-            messages.append({"role": "system", "content": system})
-        messages.append({"role": "user", "content": prompt})
+
+        if messages is None:
+            messages = []
+            if system:
+                messages.append({"role": "system", "content": system})
+            messages.append({"role": "user", "content": prompt})
+        else:
+            msg_list = []
+            if system:
+                msg_list.append({"role": "system", "content": system})
+            msg_list.extend(messages)
+            messages = msg_list
+
         payload = {"model": "default", "messages": messages,
                    "temperature": temperature, "max_tokens": 2048}
 
@@ -1306,7 +1441,8 @@ class OpenAIClient:
         self.config = config
         self.logger = logging.getLogger("labdojo.openai")
 
-    async def chat(self, prompt: str, system: str = "", temperature: float = 0.7) -> str:
+    async def chat(self, prompt: str, system: str = "",
+                   temperature: float = 0.7, messages: list = None) -> str:
         if not self.config.openai_api_key:
             return ""
         base_url = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
@@ -1315,10 +1451,19 @@ class OpenAIClient:
         url = f"{base_url}/chat/completions" if "/v1" in base_url else f"{base_url}/v1/chat/completions"
         headers = {"Authorization": f"Bearer {self.config.openai_api_key}",
                    "Content-Type": "application/json"}
-        messages = []
-        if system:
-            messages.append({"role": "system", "content": system})
-        messages.append({"role": "user", "content": prompt})
+
+        if messages is None:
+            messages = []
+            if system:
+                messages.append({"role": "system", "content": system})
+            messages.append({"role": "user", "content": prompt})
+        else:
+            msg_list = []
+            if system:
+                msg_list.append({"role": "system", "content": system})
+            msg_list.extend(messages)
+            messages = msg_list
+
         payload = {"model": self.config.openai_model or "gpt-4o-mini",
                    "messages": messages, "temperature": temperature, "max_tokens": 2048}
         try:
@@ -1346,14 +1491,21 @@ class AnthropicClient:
         self.config = config
         self.logger = logging.getLogger("labdojo.anthropic")
 
-    async def chat(self, prompt: str, system: str = "", temperature: float = 0.7) -> str:
+    async def chat(self, prompt: str, system: str = "",
+                   temperature: float = 0.7, messages: list = None) -> str:
         if not self.config.anthropic_api_key:
             return ""
         headers = {"x-api-key": self.config.anthropic_api_key,
                    "Content-Type": "application/json",
                    "anthropic-version": "2023-06-01"}
-        messages = [{"role": "user", "content": prompt}]
-        payload = {"model": self.config.anthropic_model or "claude-3-haiku-20240307",
+
+        if messages is None:
+            messages = [{"role": "user", "content": prompt}]
+        else:
+            msg_list = list(messages)
+            messages = msg_list
+
+        payload = {"model": self.config.anthropic_model,
                    "messages": messages, "max_tokens": 2048, "temperature": temperature}
         if system:
             payload["system"] = system
@@ -1385,7 +1537,8 @@ class InferenceRouter:
         self.logger = logging.getLogger("labdojo.router")
 
     async def chat(self, prompt: str, system: str = "",
-                   temperature: float = 0.7, deterministic: bool = False) -> tuple[str, str]:
+                   temperature: float = 0.7, deterministic: bool = False,
+                   messages: list = None) -> tuple[str, str]:
         """Returns (response_text, backend_name). Tries all backends in priority order."""
         if deterministic:
             temperature = 0.0
@@ -1399,7 +1552,9 @@ class InferenceRouter:
 
         for name, client in backends:
             try:
-                result = await client.chat(prompt, system=system, temperature=temperature)
+                result = await client.chat(
+                    prompt, system=system, temperature=temperature,
+                    messages=messages)
                 if result and result.strip():
                     self.logger.info(f"Response from {name} ({len(result)} chars)")
                     return result.strip(), name
@@ -1423,7 +1578,7 @@ class InferenceRouter:
 # System Prompt and Response Processing
 # ---------------------------------------------------------------------------
 
-_SYSTEM_PROMPT = """You are a research-grade AI assistant embedded in Lab Dojo, a workstation for principal investigators and senior researchers in pathology and biomedical sciences.
+_SYSTEM_PROMPT = """You are Lab Dojo, a research-grade AI assistant for principal investigators and senior researchers in pathology and biomedical sciences. You are designed for use in any research laboratory at any university worldwide.
 
 Core operating principles:
 1. Treat every user as a domain expert. Never explain foundational concepts unless explicitly asked. If someone asks about O-GlcNAcylation of NF-kB, discuss the specific transferases, sites, and functional consequences, not what post-translational modifications are.
@@ -1434,7 +1589,8 @@ Core operating principles:
 6. Never add generic safety disclaimers, confidence labels, or pedagogical framing.
 7. Provide mechanistic depth. Discuss specific residues, binding partners, signaling cascades, and experimental approaches.
 8. When relevant, mention contradictions in the literature or open questions.
-9. Keep responses focused. Do not pad with background the user already knows."""
+9. Keep responses focused. Do not pad with background the user already knows.
+10. For conversational messages (greetings, thanks, etc.), respond naturally and briefly without launching into research mode."""
 
 _VERBOSITY = {
     "concise": "\nBe direct. Data and conclusions only. No background, no hedging. 2-4 sentences max.",
@@ -1531,8 +1687,16 @@ def create_app() -> FastAPI:
     apis = ScienceAPIs(config, kb)
     router = InferenceRouter(config)
 
-    app = FastAPI(title="Lab Dojo", version="0.1.0",
+    app = FastAPI(title="Lab Dojo", version=__version__,
                   description="Research workstation for pathology and biomedical sciences")
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
     @app.on_event("startup")
     async def startup():
@@ -1542,13 +1706,17 @@ def create_app() -> FastAPI:
         else:
             logger.info("No local Ollama found. Configure a backend in Settings.")
 
+    @app.on_event("shutdown")
+    async def shutdown():
+        await apis.close()
+
     # -- Status --
 
     @app.get("/status")
     async def get_status():
         ai_status = await router.get_status()
         return {
-            "version": "0.1.0",
+            "version": __version__,
             "ai_backends": ai_status,
             "apis": apis.get_api_status(),
             "stats": kb.get_usage(),
@@ -1567,18 +1735,36 @@ def create_app() -> FastAPI:
         if not req.message.strip():
             raise HTTPException(400, "Message cannot be empty")
 
-        kb.add_conversation(req.project_id or "default", "user", req.message)
+        project_id = req.project_id or "default"
+        kb.add_conversation(project_id, "user", req.message)
         start = time.time()
+
+        # Check if this is a casual message (greeting, thanks, etc.)
+        intent, casual_response = classify_intent(req.message)
+        if intent == "casual":
+            kb.add_conversation(project_id, "assistant", casual_response)
+            return {"response": casual_response, "source": "system",
+                    "grounding": [], "latency": round(time.time() - start, 2)}
 
         # Check memory for similar questions
         recalled = kb.recall_similar(req.message)
         if recalled:
-            kb.add_conversation(req.project_id or "default", "assistant", recalled)
-            return {"response": recalled, "source": "memory",
+            answer = recalled["answer"]
+            kb.add_conversation(project_id, "assistant", answer)
+            return {"response": answer, "source": "memory",
                     "grounding": [], "latency": round(time.time() - start, 2)}
 
-        # Fetch grounding data from science APIs
+        # Fetch grounding data from science APIs (parallel)
         context, sources = await apis.fetch_grounding_data(req.message)
+
+        # Build conversation history for context
+        history = kb.get_conversations(project_id, limit=10)
+        conv_messages = []
+        for msg in history[:-1]:  # exclude the current message we just added
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            if role in ("user", "assistant") and content:
+                conv_messages.append({"role": role, "content": content[:500]})
 
         # Build prompt with grounding
         system = _SYSTEM_PROMPT + _VERBOSITY.get(req.verbosity, _VERBOSITY["detailed"])
@@ -1586,10 +1772,14 @@ def create_app() -> FastAPI:
         if context:
             prompt = f"GROUNDING DATA (cite by PMID where available):\n{context}\n\nQUESTION: {req.message}"
 
-        # Get AI response
+        # Add current message to conversation
+        conv_messages.append({"role": "user", "content": prompt})
+
+        # Get AI response with conversation history
         response, backend = await router.chat(
             prompt, system=system,
-            temperature=0.7, deterministic=req.deterministic)
+            temperature=0.7, deterministic=req.deterministic,
+            messages=conv_messages if len(conv_messages) > 1 else None)
 
         if not response and context:
             response = f"No AI backend available. Raw data from {', '.join(sources)}:\n\n{context}"
@@ -1598,7 +1788,7 @@ def create_app() -> FastAPI:
             raise HTTPException(503, "No AI backends configured. Add Ollama, an API key, or serverless endpoint in Settings.")
 
         response = _clean_response(response)
-        kb.add_conversation(req.project_id or "default", "assistant", response)
+        kb.add_conversation(project_id, "assistant", response)
         kb.learn_qa(req.message, response, backend)
         kb.record_usage(local=1 if backend == 'ollama' else 0,
                         serverless=1 if backend in ('serverless', 'openai', 'anthropic') else 0)
@@ -1671,11 +1861,7 @@ def create_app() -> FastAPI:
 
     @app.delete("/projects/{project_id}")
     async def delete_project(project_id: str):
-        with kb._lock:
-            conn = kb._get_conn()
-            conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
-            conn.execute("DELETE FROM decisions WHERE project_id = ?", (project_id,))
-            conn.commit()
+        kb.delete_project(project_id)
         return {"deleted": project_id}
 
     # -- Decisions --
@@ -1727,7 +1913,7 @@ def create_app() -> FastAPI:
         for msg in history:
             role = msg.get("role", "").upper()
             text = msg.get("content", "")
-            ts = msg.get("timestamp", "")
+            ts = msg.get("created_at", "")
             lines.append(f"[{ts}] {role}: {text}")
         return Response(content="\n\n".join(lines), media_type="text/plain",
                         headers={"Content-Disposition": "attachment; filename=conversation.txt"})
@@ -1741,7 +1927,7 @@ def create_app() -> FastAPI:
 
     @app.post("/pipeline/run")
     async def run_pipeline(req: PipelineRequest):
-        run_id = kb.create_pipeline_run(req.pipeline_type, req.query)
+        run_id = kb.create_pipeline_run(req.pipeline_type, {"query": req.query, **req.params})
 
         if req.pipeline_type == "literature_review":
             papers = await apis.search_pubmed(req.query, max_results=10)
@@ -1755,11 +1941,13 @@ def create_app() -> FastAPI:
 
         elif req.pipeline_type == "protein_analysis":
             term = req.query.split()[0] if req.query.split() else req.query
-            uniprot = await apis._search_uniprot(term)
-            pdb = await apis._search_pdb(term)
-            string = await apis._search_string(term)
-            alphafold = await apis._search_alphafold(term)
-            context = "\n\n".join(filter(None, [uniprot, pdb, string, alphafold]))
+            uniprot, pdb, string_data, alphafold = await asyncio.gather(
+                apis._search_uniprot(term),
+                apis._search_pdb(term),
+                apis._search_string(term),
+                apis._search_alphafold(term),
+            )
+            context = "\n\n".join(filter(None, [uniprot, pdb, string_data, alphafold]))
             system = "Provide a structural and functional analysis of this protein based on the data. Include known domains, interactions, and structural features."
             prompt = f"DATA:\n{context}\n\nPROTEIN: {req.query}"
             response, backend = await router.chat(prompt, system=system)
@@ -1768,11 +1956,13 @@ def create_app() -> FastAPI:
             result = {"analysis": _clean_response(response), "databases_queried": ["UniProt", "PDB", "STRING", "AlphaFold"]}
 
         elif req.pipeline_type == "drug_target":
-            chembl = await apis._search_chembl(req.query)
-            pubchem = await apis._search_pubchem(req.query)
-            fda = await apis._search_openfda(req.query)
-            rxnorm = await apis._search_rxnorm(req.query)
-            trials = await apis._search_clinicaltrials(req.query)
+            chembl, pubchem, fda, rxnorm, trials = await asyncio.gather(
+                apis._search_chembl(req.query),
+                apis._search_pubchem(req.query),
+                apis._search_openfda(req.query),
+                apis._search_rxnorm(req.query),
+                apis._search_clinicaltrials(req.query),
+            )
             context = "\n\n".join(filter(None, [chembl, pubchem, fda, rxnorm, trials]))
             system = "Analyze this compound/target from a drug development perspective. Include known pharmacology, clinical status, and safety data."
             prompt = f"DATA:\n{context}\n\nQUERY: {req.query}"
@@ -1782,9 +1972,11 @@ def create_app() -> FastAPI:
             result = {"analysis": _clean_response(response), "databases_queried": ["ChEMBL", "PubChem", "openFDA", "RxNorm", "ClinicalTrials"]}
 
         elif req.pipeline_type == "pathway_analysis":
-            reactome = await apis._search_reactome(req.query)
-            kegg = await apis._search_kegg(req.query)
-            go = await apis._search_gene_ontology(req.query)
+            reactome, kegg, go = await asyncio.gather(
+                apis._search_reactome(req.query),
+                apis._search_kegg(req.query),
+                apis._search_gene_ontology(req.query),
+            )
             context = "\n\n".join(filter(None, [reactome, kegg, go]))
             system = "Analyze the pathway data. Describe the signaling cascade, key nodes, and regulatory mechanisms."
             prompt = f"DATA:\n{context}\n\nPATHWAY: {req.query}"
@@ -1794,9 +1986,11 @@ def create_app() -> FastAPI:
             result = {"analysis": _clean_response(response), "databases_queried": ["Reactome", "KEGG", "Gene Ontology"]}
 
         elif req.pipeline_type == "cancer_genomics":
-            gdc = await apis._search_gdc(req.query)
-            cbio = await apis._search_cbioportal(req.query)
-            pubmed = await apis._search_pubmed(f"{req.query} cancer mutation")
+            gdc, cbio, pubmed = await asyncio.gather(
+                apis._search_gdc(req.query),
+                apis._search_cbioportal(req.query),
+                apis._search_pubmed(f"{req.query} cancer mutation"),
+            )
             context = "\n\n".join(filter(None, [gdc, cbio, pubmed]))
             system = "Analyze the cancer genomics data. Discuss mutation frequency, clinical significance, and therapeutic implications."
             prompt = f"DATA:\n{context}\n\nGENE/TARGET: {req.query}"
@@ -1830,9 +2024,9 @@ def create_app() -> FastAPI:
     async def list_monitor_topics():
         return {"topics": kb.get_monitored_topics()}
 
-    @app.delete("/monitor/topics/{topic_name}")
-    async def remove_monitor_topic(topic_name: str):
-        kb.remove_monitored_topic(topic_name)
+    @app.delete("/monitor/topics/{topic_id}")
+    async def remove_monitor_topic(topic_id: int):
+        kb.remove_monitored_topic(topic_id)
         return {"status": "removed"}
 
     @app.post("/monitor/check")
@@ -1840,8 +2034,8 @@ def create_app() -> FastAPI:
         topics = kb.get_monitored_topics()
         results = {}
         for t in topics:
-            papers = await apis.search_pubmed(t["query"], max_results=3)
-            results[t["name"]] = {"new_papers": len(papers), "papers": papers}
+            papers = await apis.search_pubmed(t["topic"], max_results=3)
+            results[t["topic"]] = {"new_papers": len(papers), "papers": papers}
         return {"results": results}
 
     # -- Learning --
@@ -1872,7 +2066,9 @@ def create_app() -> FastAPI:
         d = {k: v for k, v in config.__dict__.items() if not k.startswith('_')}
         for sk in _SENSITIVE_KEYS:
             if sk in d and d[sk]:
-                d[sk] = d[sk][:8] + '...' if len(d[sk]) > 8 else '***'
+                d[sk] = "configured"
+            elif sk in d:
+                d[sk] = ""
         return d
 
     @app.post("/settings/update")
@@ -2045,6 +2241,14 @@ body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg-pri
 .typing-indicator span:nth-child(3) { animation-delay: 0.4s; }
 @keyframes bounce { 0%,60%,100% { transform: translateY(0); } 30% { transform: translateY(-6px); } }
 
+/* Welcome */
+.welcome-msg { text-align: center; padding: 60px 40px; color: var(--text-secondary); }
+.welcome-msg h3 { font-size: 18px; color: var(--text-primary); margin-bottom: 12px; }
+.welcome-msg p { font-size: 14px; line-height: 1.8; max-width: 500px; margin: 0 auto; }
+.welcome-msg .examples { margin-top: 20px; text-align: left; display: inline-block; }
+.welcome-msg .example { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 16px; margin: 6px 0; cursor: pointer; font-size: 13px; transition: border-color 0.15s; }
+.welcome-msg .example:hover { border-color: var(--accent); color: var(--accent); }
+
 /* Scrollbar */
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
@@ -2105,7 +2309,17 @@ body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg-pri
                     <label for="deterministic">Deterministic</label>
                 </div>
             </div>
-            <div class="chat-messages" id="chat-messages"></div>
+            <div class="chat-messages" id="chat-messages">
+                <div class="welcome-msg" id="welcome">
+                    <h3>Welcome to Lab Dojo</h3>
+                    <p>Your AI research assistant with access to 20 biomedical databases. Ask any research question to get started.</p>
+                    <div class="examples">
+                        <div class="example" onclick="fillChat('What is the role of BRCA1 in DNA damage repair?')">What is the role of BRCA1 in DNA damage repair?</div>
+                        <div class="example" onclick="fillChat('Compare PD-1 and PD-L1 inhibitors in melanoma treatment')">Compare PD-1 and PD-L1 inhibitors in melanoma treatment</div>
+                        <div class="example" onclick="fillChat('What are the latest findings on TP53 mutations in colorectal cancer?')">What are the latest findings on TP53 mutations in colorectal cancer?</div>
+                    </div>
+                </div>
+            </div>
             <div class="chat-input-area">
                 <div class="chat-input-row">
                     <input type="text" id="chat-input" placeholder="Ask a research question..." onkeydown="if(event.key==='Enter')sendChat()">
@@ -2246,15 +2460,22 @@ function showPage(page) {
     if (page === 'settings') loadSettings();
 }
 
+function fillChat(text) {
+    document.getElementById('chat-input').value = text;
+    document.getElementById('chat-input').focus();
+}
+
 function addMessage(role, text, meta) {
+    const welcome = document.getElementById('welcome');
+    if (welcome) welcome.remove();
     const container = document.getElementById('chat-messages');
     const div = document.createElement('div');
     div.className = 'message ' + role;
     let html = '<div class="message-bubble">';
-    if (role === 'assistant' && typeof marked !== 'undefined') {
-        html += marked.parse(text);
+    if (role === 'assistant') {
+        try { html += marked.parse(text); } catch(e) { html += text; }
     } else {
-        html += text.replace(/\\n/g, '<br>');
+        html += text.replace(/</g, '&lt;').replace(/>/g, '&gt;');
     }
     html += '</div>';
     if (meta) html += '<div class="message-meta">' + meta + '</div>';
@@ -2273,7 +2494,7 @@ function showTyping() {
     container.scrollTop = container.scrollHeight;
 }
 
-function removeTyping() {
+function hideTyping() {
     const el = document.getElementById('typing');
     if (el) el.remove();
 }
@@ -2283,9 +2504,8 @@ async function sendChat() {
     const msg = input.value.trim();
     if (!msg) return;
     input.value = '';
-    addMessage('user', msg);
+    addMessage('user', msg, new Date().toLocaleTimeString());
     showTyping();
-
     try {
         const resp = await fetch('/chat', {
             method: 'POST',
@@ -2296,18 +2516,20 @@ async function sendChat() {
                 deterministic: document.getElementById('deterministic').checked
             })
         });
-        removeTyping();
+        hideTyping();
         if (!resp.ok) {
             const err = await resp.json().catch(() => ({detail: 'Request failed'}));
-            addMessage('assistant', err.detail || 'Error: ' + resp.status);
+            addMessage('assistant', 'Error: ' + (err.detail || 'Unknown error'), '');
             return;
         }
         const data = await resp.json();
-        const sources = data.grounding && data.grounding.length > 0 ? ' | Sources: ' + data.grounding.join(', ') : '';
-        addMessage('assistant', data.response, data.source + sources + ' | ' + data.latency + 's');
-    } catch (e) {
-        removeTyping();
-        addMessage('assistant', 'Connection error. Is the server running?');
+        let meta = 'via ' + data.source;
+        if (data.grounding && data.grounding.length) meta += ' | grounded in: ' + data.grounding.join(', ');
+        if (data.latency) meta += ' | ' + data.latency + 's';
+        addMessage('assistant', data.response, meta);
+    } catch(e) {
+        hideTyping();
+        addMessage('assistant', 'Connection error. Is the server running?', '');
     }
 }
 
@@ -2317,37 +2539,34 @@ async function searchPapers() {
     const container = document.getElementById('paper-results');
     container.innerHTML = '<div class="loading"></div> Searching PubMed...';
     try {
-        const resp = await fetch('/papers/search?query=' + encodeURIComponent(query) + '&max_results=15');
+        const resp = await fetch('/papers/search?query=' + encodeURIComponent(query) + '&max_results=10');
         const data = await resp.json();
         lastPaperPmids = data.papers.map(p => p.pmid);
-        if (!data.papers.length) {
-            container.innerHTML = '<p style="color:var(--text-muted)">No results found.</p>';
-            return;
-        }
+        if (!data.papers.length) { container.innerHTML = '<p style="color:var(--text-muted)">No results found.</p>'; return; }
         container.innerHTML = data.papers.map(p => {
             const authors = (p.authors || []).slice(0, 3).join(', ') + (p.authors && p.authors.length > 3 ? ' et al.' : '');
             return '<div class="paper-card">' +
-                '<h3>' + (p.title || '') + '</h3>' +
+                '<h3>' + (p.title || 'Untitled') + '</h3>' +
                 '<div class="meta">PMID: ' + p.pmid + ' | ' + authors + ' | ' + (p.journal || '') + ' (' + (p.pub_date || '') + ')</div>' +
-                (p.doi_url ? '<a href="' + p.doi_url + '" target="_blank">' + p.doi_url + '</a>' : '') +
-                (p.abstract ? '<div class="abstract">' + p.abstract.substring(0, 400) + '...</div>' : '') +
+                (p.doi_url ? '<a href="' + p.doi_url + '" target="_blank">DOI</a> | ' : '') +
+                '<a href="https://pubmed.ncbi.nlm.nih.gov/' + p.pmid + '/" target="_blank">PubMed</a>' +
+                (p.abstract ? '<div class="abstract">' + p.abstract.substring(0, 300) + '...</div>' : '') +
                 '</div>';
         }).join('');
-    } catch (e) {
+    } catch(e) {
         container.innerHTML = '<p style="color:var(--red)">Search failed.</p>';
     }
 }
 
-async function exportResults(format) {
-    if (!lastPaperPmids.length) { alert('Search for papers first'); return; }
-    const pmids = lastPaperPmids.join(',');
-    window.open('/export/' + format + '?pmids=' + pmids, '_blank');
+function exportResults(format) {
+    if (!lastPaperPmids.length) { alert('Search for papers first.'); return; }
+    window.open('/export/' + format + '?pmids=' + lastPaperPmids.join(','));
 }
 
 function showPipelineForm(type) {
     currentPipelineType = type;
     document.getElementById('pipeline-form').style.display = 'block';
-    document.getElementById('pipeline-query').placeholder = 'Enter query for ' + type.replace(/_/g, ' ') + '...';
+    document.getElementById('pipeline-query').placeholder = 'Enter query for ' + type.replace('_', ' ') + '...';
     document.getElementById('pipeline-query').focus();
 }
 
@@ -2355,29 +2574,57 @@ async function runPipeline() {
     const query = document.getElementById('pipeline-query').value.trim();
     if (!query || !currentPipelineType) return;
     const container = document.getElementById('pipeline-results');
-    container.innerHTML = '<div class="loading"></div> Running ' + currentPipelineType.replace(/_/g, ' ') + '...';
+    container.innerHTML = '<div class="loading"></div> Running ' + currentPipelineType.replace('_', ' ') + '... This may take 30-60 seconds.';
     try {
         const resp = await fetch('/pipeline/run', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({pipeline_type: currentPipelineType, query: query})
+            body: JSON.stringify({ pipeline_type: currentPipelineType, query: query })
         });
         const data = await resp.json();
-        if (!resp.ok) {
-            container.innerHTML = '<p style="color:var(--red)">' + (data.detail || 'Pipeline failed') + '</p>';
-            return;
-        }
-        const result = data.result;
-        let html = '<div class="paper-card"><h3>Pipeline: ' + currentPipelineType.replace(/_/g, ' ') + '</h3>';
-        if (result.synthesis) html += '<div class="abstract">' + marked.parse(result.synthesis) + '</div>';
-        if (result.analysis) html += '<div class="abstract">' + marked.parse(result.analysis) + '</div>';
+        if (!resp.ok) { container.innerHTML = '<p style="color:var(--red)">' + (data.detail || 'Pipeline failed') + '</p>'; return; }
+        const result = data.result || {};
+        let html = '<div class="paper-card"><h3>Pipeline: ' + currentPipelineType.replace('_', ' ') + '</h3>';
         if (result.databases_queried) html += '<div class="meta">Databases: ' + result.databases_queried.join(', ') + '</div>';
-        if (result.papers) html += '<div class="meta">Papers found: ' + result.papers + '</div>';
+        const text = result.synthesis || result.analysis || JSON.stringify(result, null, 2);
+        try { html += '<div style="margin-top:12px;">' + marked.parse(text) + '</div>'; } catch(e) { html += '<pre>' + text + '</pre>'; }
         html += '</div>';
         container.innerHTML = html;
-    } catch (e) {
+    } catch(e) {
         container.innerHTML = '<p style="color:var(--red)">Pipeline error.</p>';
     }
+}
+
+async function loadApis() {
+    try {
+        const resp = await fetch('/apis');
+        const data = await resp.json();
+        const grid = document.getElementById('api-grid');
+        grid.innerHTML = Object.entries(data.apis).map(([id, api]) =>
+            '<div class="api-card">' +
+            '<h4>' + api.name + '</h4>' +
+            '<p>' + api.description + '</p>' +
+            '<span class="badge badge-free">' + api.rate_limit + '</span>' +
+            '</div>'
+        ).join('');
+    } catch(e) {}
+}
+
+async function loadProjects() {
+    try {
+        const resp = await fetch('/projects');
+        const data = await resp.json();
+        const container = document.getElementById('project-list');
+        if (!data.projects.length) { container.innerHTML = '<p style="color:var(--text-muted)">No projects yet.</p>'; return; }
+        container.innerHTML = data.projects.map(p =>
+            '<div class="project-card">' +
+            '<h3>' + p.name + '</h3>' +
+            '<p>' + (p.description || 'No description') + '</p>' +
+            '<div class="meta" style="font-size:11px;color:var(--text-muted);margin-top:6px;">Status: ' + p.status + ' | Created: ' + (p.created_at || '') + '</div>' +
+            '<button class="btn btn-danger btn-sm" style="margin-top:8px;" onclick="deleteProject(\'' + p.id + '\')">Delete</button>' +
+            '</div>'
+        ).join('');
+    } catch(e) {}
 }
 
 function showNewProject() {
@@ -2400,92 +2647,64 @@ async function createProject() {
     loadProjects();
 }
 
-async function loadProjects() {
-    try {
-        const resp = await fetch('/projects');
-        const data = await resp.json();
-        const container = document.getElementById('project-list');
-        if (!data.projects || !data.projects.length) {
-            container.innerHTML = '<p style="color:var(--text-muted)">No projects yet.</p>';
-            return;
-        }
-        container.innerHTML = data.projects.map(p =>
-            '<div class="project-card">' +
-            '<h3>' + p.name + '</h3>' +
-            '<p>' + (p.description || '') + '</p>' +
-            '<div class="meta" style="font-size:11px;color:var(--text-muted);margin-top:6px;">' + (p.key_terms || '') + '</div>' +
-            '</div>'
-        ).join('');
-    } catch (e) {}
-}
-
-async function loadApis() {
-    try {
-        const resp = await fetch('/apis');
-        const data = await resp.json();
-        const grid = document.getElementById('api-grid');
-        grid.innerHTML = Object.entries(data.apis).map(([id, api]) =>
-            '<div class="api-card">' +
-            '<h4>' + api.name + '</h4>' +
-            '<p>' + api.description + '</p>' +
-            '<span class="badge badge-free">FREE</span>' +
-            '</div>'
-        ).join('');
-    } catch (e) {}
+async function deleteProject(id) {
+    if (!confirm('Delete this project and all its data?')) return;
+    await fetch('/projects/' + id, { method: 'DELETE' });
+    loadProjects();
 }
 
 async function loadSettings() {
     try {
         const resp = await fetch('/settings');
         const data = await resp.json();
-        document.getElementById('set-ollama').value = data.ollama_host || 'http://localhost:11434';
-        document.getElementById('set-openai').value = data.openai_api_key ? '********' : '';
-        document.getElementById('set-anthropic').value = data.anthropic_api_key ? '********' : '';
-        document.getElementById('set-vastai').value = data.vastai_api_key ? '********' : '';
+        document.getElementById('set-ollama').value = data.ollama_host || '';
+        document.getElementById('set-openai').value = data.openai_api_key === 'configured' ? '' : (data.openai_api_key || '');
+        document.getElementById('set-openai').placeholder = data.openai_api_key === 'configured' ? 'Configured (enter new to change)' : 'sk-...';
+        document.getElementById('set-anthropic').value = data.anthropic_api_key === 'configured' ? '' : (data.anthropic_api_key || '');
+        document.getElementById('set-anthropic').placeholder = data.anthropic_api_key === 'configured' ? 'Configured (enter new to change)' : 'sk-ant-...';
+        document.getElementById('set-vastai').value = data.vastai_api_key === 'configured' ? '' : (data.vastai_api_key || '');
         document.getElementById('set-endpoint').value = data.serverless_endpoint_id || '';
-    } catch (e) {}
+    } catch(e) {}
 }
 
 async function saveSettings() {
-    const updates = {};
-    const ollama = document.getElementById('set-ollama').value;
-    const openai = document.getElementById('set-openai').value;
-    const anthropic = document.getElementById('set-anthropic').value;
-    const vastai = document.getElementById('set-vastai').value;
-    const endpoint = document.getElementById('set-endpoint').value;
-    if (ollama) updates.ollama_host = ollama;
-    if (openai && openai !== '********') updates.openai_api_key = openai;
-    if (anthropic && anthropic !== '********') updates.anthropic_api_key = anthropic;
-    if (vastai && vastai !== '********') updates.vastai_api_key = vastai;
-    if (endpoint) updates.serverless_endpoint_id = endpoint;
+    const updates = { ollama_host: document.getElementById('set-ollama').value };
+    const openai = document.getElementById('set-openai').value.trim();
+    const anthropic = document.getElementById('set-anthropic').value.trim();
+    const vastai = document.getElementById('set-vastai').value.trim();
+    const endpoint = document.getElementById('set-endpoint').value.trim();
+    if (openai) updates.openai_api_key = openai;
+    if (anthropic) updates.anthropic_api_key = anthropic;
+    if (vastai) updates.vastai_api_key = vastai;
+    if (endpoint) updates.serverless_endpoint_id = parseInt(endpoint) || 0;
     await fetch('/settings/update', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(updates)
     });
-    alert('Settings saved');
+    alert('Settings saved.');
+    checkStatus();
 }
 
 async function clearConversation() {
     if (!confirm('Clear all chat history?')) return;
-    await fetch('/conversation/clear', {method: 'POST'});
+    await fetch('/conversation/clear', { method: 'POST' });
     document.getElementById('chat-messages').innerHTML = '';
 }
 
 async function clearBadData() {
-    if (!confirm('Remove low-quality learned responses?')) return;
-    await fetch('/learning/clear_bad', {method: 'POST'});
-    alert('Bad data cleared');
+    await fetch('/learning/clear_bad', { method: 'POST' });
+    alert('Bad data cleaned.');
 }
 
 async function resetLearning() {
-    if (!confirm('This will delete ALL learned Q&A pairs. Continue?')) return;
-    await fetch('/learning/reset', {method: 'POST'});
-    alert('Learning reset');
+    if (!confirm('This will delete ALL learned data. Continue?')) return;
+    await fetch('/learning/reset', { method: 'POST' });
+    alert('Learning data reset.');
 }
 
 async function exportConversation() {
-    window.open('/export/conversation', '_blank');
+    window.open('/export/conversation');
 }
 
 async function checkStatus() {
@@ -2493,22 +2712,18 @@ async function checkStatus() {
         const resp = await fetch('/status');
         const data = await resp.json();
         const ai = data.ai_backends || {};
-        const dot = document.getElementById('dot-ai');
-        const lbl = document.getElementById('lbl-ai');
-        if (ai.ollama && ai.ollama.available) {
-            dot.className = 'status-dot on';
-            lbl.textContent = 'Ollama: ' + ai.ollama.model;
-        } else if (ai.openai && ai.openai.available) {
-            dot.className = 'status-dot on';
-            lbl.textContent = 'OpenAI connected';
-        } else if (ai.serverless && ai.serverless.available) {
-            dot.className = 'status-dot on';
-            lbl.textContent = 'Serverless ready';
-        } else {
-            dot.className = 'status-dot off';
-            lbl.textContent = 'No AI backend';
-        }
-    } catch (e) {}
+        let available = false;
+        let label = '';
+        if (ai.ollama && ai.ollama.available) { available = true; label = 'Ollama: ' + ai.ollama.model; }
+        else if (ai.openai && ai.openai.available) { available = true; label = 'OpenAI connected'; }
+        else if (ai.anthropic && ai.anthropic.available) { available = true; label = 'Anthropic connected'; }
+        else if (ai.serverless && ai.serverless.available) { available = true; label = 'Serverless connected'; }
+        else { label = 'No AI backend'; }
+        document.getElementById('dot-ai').className = 'status-dot ' + (available ? 'on' : 'off');
+        document.getElementById('lbl-ai').textContent = label;
+    } catch(e) {
+        document.getElementById('lbl-ai').textContent = 'Offline';
+    }
 }
 
 checkStatus();
@@ -2523,13 +2738,19 @@ setInterval(checkStatus, 30000);
 # ---------------------------------------------------------------------------
 
 def main():
-    import uvicorn
     config = Config.load()
-    log = setup_logging(config)
+    config.save()
+
+    print(f"""
+    Lab Dojo v{__version__} - Pathology Research Workstation
+    Copyright (c) 2025-2026 JuiceVendor Labs Inc.
+
+    Dashboard:  http://localhost:{config.port}
+    Data dir:   {config.config_dir}
+    """)
+
     app = create_app()
-    port = int(os.environ.get("LABDOJO_PORT", "8080"))
-    log.info(f"Lab Dojo v0.1.0 starting on http://localhost:{port}")
-    uvicorn.run(app, host="0.0.0.0", port=port, log_level="warning")
+    uvicorn.run(app, host=config.host, port=config.port, log_level="warning")
 
 
 if __name__ == "__main__":
