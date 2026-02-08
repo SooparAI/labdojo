@@ -1,0 +1,17 @@
+node_modules/
+labdojo-ui/node_modules/
+labdojo-ui/dist/
+.git/
+.github/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+docker/
+tests/
+*.md
+!README.md
+.env*
+*.db
+*.sqlite

@@ -1,0 +1,14 @@
+# Railway deployment configuration for Lab Dojo
+# Docs: https://docs.railway.app/reference/config-as-code
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+startCommand = "python labdojo.py"
+healthcheckPath = "/status"
+healthcheckTimeout = 30
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3
+numReplicas = 1
