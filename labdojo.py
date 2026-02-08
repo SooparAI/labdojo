@@ -1,5 +1,5 @@
 """
-Lab Dojo Pathology v0.1.1
+Lab Dojo Pathology v0.1.2
 AI-powered research workstation for pathology laboratories.
 
 Copyright (c) 2025-2026 JuiceVendor Labs Inc.
@@ -9,7 +9,7 @@ Requires: Python 3.10+, aiohttp, fastapi, uvicorn, pydantic
 Optional: Ollama (local LLM), Vast.ai serverless, OpenAI/Anthropic keys
 """
 
-__version__ = "0.1.1"
+__version__ = "0.1.2"
 __author__ = "JuiceVendor Labs Inc."
 __license__ = "MIT"
 

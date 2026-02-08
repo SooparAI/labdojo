@@ -2,7 +2,7 @@
 
 An open-source research workstation that connects 20 free science APIs to local AI models. Built for principal investigators and senior researchers who need grounded, citation-verified answers without sending data to the cloud.
 
-**Lab Dojo Pathology v0.1.1** — Released February 2026 by [JuiceVendor Labs Inc.](https://labdojo.org)
+**Lab Dojo Pathology v0.1.2** — Released February 2026 by [JuiceVendor Labs Inc.](https://labdojo.org)
 
 ## Quick Start
 
@@ -81,6 +81,14 @@ labdojo.py
 ├── FastAPI Application (30+ REST endpoints)
 └── Dashboard UI (dark theme)
 ```
+
+## What's New in v0.1.2
+
+- All version strings unified across `labdojo.py`, installers, and Docker inference server
+- Website changelog system now live at [labdojo.org](https://labdojo.org) with AI-generated developer summaries
+- Architecture documentation and roadmap published for contributors
+
+See the full release notes on [GitHub Releases](https://github.com/SooparAI/labdojo/releases).
 
 ## API Endpoints
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Lab Dojo v8 - Serverless Inference Server
+Lab Dojo v0.1.2 - Serverless Inference Server
 Runs vLLM with OpenAI-compatible API on Vast.ai Serverless
 """
 

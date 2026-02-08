@@ -1,13 +1,13 @@
 @echo off
 REM ============================================================================
-REM Lab Dojo v10 - One-Click Installer for Windows
+REM Lab Dojo v0.1.2 - One-Click Installer for Windows
 REM ============================================================================
 
-title Lab Dojo v10 Installer
+title Lab Dojo v0.1.2 Installer
 
 echo ========================================
-echo        Lab Dojo v10 Installer
-echo        Serverless Edition
+echo        Lab Dojo v0.1.2 Pathology Installer
+echo        AI Research Workstation
 echo ========================================
 echo.
 

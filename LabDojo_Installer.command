@@ -1,14 +1,14 @@
 #!/bin/bash
 # ============================================================================
-# Lab Dojo v10 - One-Click Installer & Launcher for macOS
+# Lab Dojo v0.1.2 - One-Click Installer & Launcher for macOS
 # Works on Intel and Apple Silicon (M1/M2/M3/M4)
 # ============================================================================
 
 set -e
 
 echo "╔══════════════════════════════════════════════════════════════╗"
-echo "║                    Lab Dojo v10                             ║"
-echo "║              Research-Grade AI Assistant                    ║"
+echo "║                    Lab Dojo v0.1.2 Pathology                ║"
+echo "║              AI Research Workstation                        ║"
 echo "╚══════════════════════════════════════════════════════════════╝"
 echo
 
