@@ -1,0 +1,83 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "labdojo"
+version = "0.1.2"
+description = "AI-powered research workstation for pathology laboratories"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [
+    { name = "JuiceVendor Labs Inc.", email = "hello@soopar.ai" },
+]
+keywords = ["pathology", "research", "ai", "bioinformatics", "pubmed", "llm"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Topic :: Scientific/Engineering :: Medical Science Apps.",
+]
+dependencies = [
+    "aiohttp>=3.9",
+    "fastapi>=0.100",
+    "uvicorn>=0.20",
+    "pydantic>=2.0",
+]
+
+[project.optional-dependencies]
+openai = ["openai>=1.0"]
+anthropic = ["anthropic>=0.20"]
+all = ["openai>=1.0", "anthropic>=0.20"]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+    "ruff>=0.4",
+    "mypy>=1.0",
+]
+
+[project.scripts]
+labdojo = "labdojo.__main__:main"
+
+[project.urls]
+Homepage = "https://labdojo.org"
+Repository = "https://github.com/SooparAI/labdojo"
+Issues = "https://github.com/SooparAI/labdojo/issues"
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "labdojo/",
+    "labdojo.py",
+    "science_catalog.json",
+    "labdojo-ui/dist/",
+    "README.md",
+    "LICENSE",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["labdojo"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

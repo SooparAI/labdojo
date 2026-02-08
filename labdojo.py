@@ -2092,10 +2092,21 @@ def create_app() -> FastAPI:
         return {"apis": apis.get_api_status()}
 
     # -- Dashboard --
+    # Serve the React UI from labdojo-ui/dist if it exists,
+    # otherwise fall back to the inline HTML dashboard.
+    ui_dist = Path(__file__).parent / "labdojo-ui" / "dist"
+    if ui_dist.exists() and (ui_dist / "index.html").exists():
+        from starlette.staticfiles import StaticFiles
+        # Serve static assets (JS, CSS, etc.)
+        app.mount("/assets", StaticFiles(directory=str(ui_dist / "assets")), name="ui-assets")
 
-    @app.get("/")
-    async def dashboard():
-        return HTMLResponse(get_dashboard_html())
+        @app.get("/")
+        async def dashboard():
+            return HTMLResponse((ui_dist / "index.html").read_text())
+    else:
+        @app.get("/")
+        async def dashboard():
+            return HTMLResponse(get_dashboard_html())
 
     return app
 
