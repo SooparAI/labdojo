@@ -579,9 +579,9 @@ class KnowledgeBase:
 # ---------------------------------------------------------------------------
 
 _CASUAL_PATTERNS = [
-    r"^(hi|hello|hey|howdy|greetings|yo|sup|hola|good\s*(morning|afternoon|evening|day))(\s+\w+)?[\s!.,?]*$",
-    r"^(thanks|thank\s*you|thx|ty|cheers|appreciated|great|awesome|cool|nice|ok|okay|got\s*it|understood)[\s!.,?]*$",
-    r"^(bye|goodbye|see\s*you|later|cya|take\s*care|peace)[\s!.,?]*$",
+    r"^(hi|hello|hey|howdy|greetings|yo|sup|hola|good\s*(morning|afternoon|evening|day|night))(\s+\w+)*[\s!.,?]*$",
+    r"^(thanks|thank\s*you(\s+\w+)*|thx|ty|cheers|appreciated|great|awesome|cool|nice|ok|okay|got\s*it|understood)[\s!.,?]*$",
+    r"^(bye|goodbye|see\s*you(\s+\w+)*|later|cya|take\s*care|peace)[\s!.,?]*$",
     r"^(what\s*(can|do)\s*you\s*do|help|how\s*do\s*(i|you)\s*use|what\s*is\s*this|who\s*are\s*you|what\s*are\s*you)[\s?!.,]*$",
     r"^(test|testing|ping|are\s*you\s*(there|working|alive|online))[\s?!.,]*$",
     r"^(how\s*are\s*you|how('s|\s*is)\s*it\s*going|what('s|\s*is)\s*up)[\s?!.,]*$",
@@ -612,9 +612,9 @@ def classify_intent(message: str) -> tuple[str, str]:
 
     for pattern in _CASUAL_PATTERNS:
         if re.match(pattern, msg_lower, re.IGNORECASE):
-            if re.match(r"^(hi|hello|hey|howdy|greetings|yo|sup|hola|good\s*(morning|afternoon|evening|day))", msg_lower):
+            if re.match(r"^(hi|hello|hey|howdy|greetings|yo|sup|hola|good\s*(morning|afternoon|evening|day|night))", msg_lower):
                 return "casual", _CASUAL_RESPONSES["greeting"]
-            elif re.match(r"^(thanks|thank|thx|ty|cheers|appreciated|great|awesome|cool|nice|ok|okay|got\s*it|understood)", msg_lower):
+            elif re.match(r"^(thanks|thank\s*you|thx|ty|cheers|appreciated|great|awesome|cool|nice|ok|okay|got\s*it|understood)", msg_lower):
                 return "casual", _CASUAL_RESPONSES["thanks"]
             elif re.match(r"^(bye|goodbye|see\s*you|later|cya|take\s*care|peace)", msg_lower):
                 return "casual", _CASUAL_RESPONSES["farewell"]
