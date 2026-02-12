@@ -1,0 +1,47 @@
+# Lab Dojo - Windows Installation (No Virus Warnings!)
+
+## Quick Install (Recommended)
+
+Open PowerShell or Command Prompt and run:
+
+```cmd
+pip install labdojo && labdojo
+```
+
+That's it! Lab Dojo will open at http://localhost:8080
+
+## What This Does
+
+1. Downloads Lab Dojo from PyPI (Python Package Index - trusted by millions)
+2. Installs all dependencies automatically
+3. Launches the application
+
+## Requirements
+
+- Python 3.9+ (download from https://python.org)
+- Ollama (optional, for local AI - download from https://ollama.com)
+
+## Why This Method?
+
+✓ No virus warnings (pip packages are trusted)
+✓ No code signing needed
+✓ Works on all platforms
+✓ Easy to update: `pip install --upgrade labdojo`
+
+## Troubleshooting
+
+If `pip` is not found:
+```cmd
+python -m pip install labdojo && python -m labdojo
+```
+
+If you get a permission error:
+```cmd
+pip install --user labdojo && labdojo
+```
+
+## Uninstall
+
+```cmd
+pip uninstall labdojo
+```

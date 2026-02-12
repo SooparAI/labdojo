@@ -6,21 +6,29 @@ An open-source research workstation that connects 20 free science APIs to local 
 
 ## Quick Start
 
-### Windows
-Double-click `LabDojo_Installer.bat`
+### One-Line Install (Recommended)
 
-### Mac
-Double-click `LabDojo_Installer.command`
+**Windows:**
+```cmd
+pip install labdojo && labdojo
+```
 
-(If macOS blocks it: right-click → Open → click "Open")
+**macOS/Linux:**
+```bash
+pip3 install labdojo && labdojo
+```
 
-### Manual Setup
+That's it! Lab Dojo will open at http://localhost:8080
+
+**Why pip?** No virus warnings, no code signing needed, trusted by millions of developers.
+
+### Alternative: Run from Source
 
 ```bash
-pip install aiohttp fastapi uvicorn pydantic
-ollama pull llama3:8b
-python3 labdojo.py
-# Open http://localhost:8080
+git clone https://github.com/SooparAI/labdojo.git
+cd labdojo
+pip install -e .
+labdojo
 ```
 
 ## Science APIs (20 databases, no keys required)

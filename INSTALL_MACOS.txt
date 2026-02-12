@@ -1,0 +1,52 @@
+# Lab Dojo - macOS Installation (No Virus Warnings!)
+
+## Quick Install (Recommended)
+
+Open Terminal and run:
+
+```bash
+pip3 install labdojo && labdojo
+```
+
+That's it! Lab Dojo will open at http://localhost:8080
+
+## What This Does
+
+1. Downloads Lab Dojo from PyPI (Python Package Index - trusted by millions)
+2. Installs all dependencies automatically
+3. Launches the application
+
+## Requirements
+
+- Python 3.9+ (pre-installed on macOS 12+, or install from https://python.org)
+- Ollama (optional, for local AI - install with `brew install ollama`)
+
+## Why This Method?
+
+✓ No Gatekeeper warnings (pip packages are trusted)
+✓ No code signing needed
+✓ Works on Intel and Apple Silicon
+✓ Easy to update: `pip3 install --upgrade labdojo`
+
+## Troubleshooting
+
+If `pip3` is not found:
+```bash
+python3 -m pip install labdojo && python3 -m labdojo
+```
+
+If you get a permission error:
+```bash
+pip3 install --user labdojo && labdojo
+```
+
+If `labdojo` command is not found after install:
+```bash
+python3 -m labdojo
+```
+
+## Uninstall
+
+```bash
+pip3 uninstall labdojo
+```
