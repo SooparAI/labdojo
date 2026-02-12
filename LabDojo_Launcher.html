@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lab Dojo v0.1.2 - One-Click Launcher</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: #ffffff;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 600px;
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            background: linear-gradient(135deg, #00ff88 0%, #00d4ff 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        .subtitle {
+            color: #aaa;
+            margin-bottom: 30px;
+            font-size: 1.1em;
+        }
+        
+        .button {
+            display: block;
+            width: 100%;
+            padding: 20px;
+            margin: 15px 0;
+            font-size: 1.2em;
+            font-weight: bold;
+            color: #000;
+            background: linear-gradient(135deg, #00ff88 0%, #00d4ff 100%);
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        
+        .button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 30px rgba(0, 255, 136, 0.3);
+        }
+        
+        .button:active {
+            transform: translateY(0);
+        }
+        
+        .info {
+            background: rgba(0, 255, 136, 0.1);
+            border-left: 4px solid #00ff88;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 5px;
+            font-size: 0.95em;
+        }
+        
+        .warning {
+            background: rgba(255, 193, 7, 0.1);
+            border-left: 4px solid #ffc107;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 5px;
+            font-size: 0.9em;
+        }
+        
+        .steps {
+            margin: 20px 0;
+            padding-left: 20px;
+        }
+        
+        .steps li {
+            margin: 10px 0;
+            line-height: 1.6;
+        }
+        
+        a {
+            color: #00d4ff;
+            text-decoration: none;
+        }
+        
+        a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Lab Dojo v0.1.2</h1>
+        <p class="subtitle">AI Research Workstation for Pathology</p>
+        
+        <div class="info">
+            <strong>✓ No virus warnings</strong> - This HTML file is 100% safe<br>
+            <strong>✓ No installation</strong> - Just click and run<br>
+            <strong>✓ 100% local</strong> - Your data never leaves your machine
+        </div>
+        
+        <button class="button" onclick="downloadAndRun()">
+            🚀 Launch Lab Dojo
+        </button>
+        
+        <div class="warning" id="instructions" style="display:none;">
+            <strong>Next steps:</strong>
+            <ol class="steps">
+                <li id="step1">Downloading installer...</li>
+                <li id="step2">Open your Downloads folder</li>
+                <li id="step3">Double-click the installer file</li>
+                <li id="step4">Lab Dojo will open at <a href="http://localhost:8080" target="_blank">http://localhost:8080</a></li>
+            </ol>
+        </div>
+        
+        <div class="info">
+            <strong>Requirements:</strong><br>
+            • Python 3.9+ (<a href="https://python.org/downloads" target="_blank">download</a>)<br>
+            • Ollama (<a href="https://ollama.com/download" target="_blank">download</a>) - optional, for local AI
+        </div>
+    </div>
+    
+    <script>
+        function detectOS() {
+            const platform = navigator.platform.toLowerCase();
+            const userAgent = navigator.userAgent.toLowerCase();
+            
+            if (platform.includes('win')) return 'windows';
+            if (platform.includes('mac') || userAgent.includes('mac')) return 'mac';
+            if (platform.includes('linux')) return 'linux';
+            return 'unknown';
+        }
+        
+        function downloadAndRun() {
+            const os = detectOS();
+            const instructions = document.getElementById('instructions');
+            const step1 = document.getElementById('step1');
+            
+            if (os === 'windows') {
+                // Create and download .bat file
+                const batContent = `@echo off
+REM Lab Dojo v0.1.2 - One-Click Installer for Windows
+
+title Lab Dojo v0.1.2 Installer
+
+echo ========================================
+echo        Lab Dojo v0.1.2 Pathology
+echo        AI Research Workstation
+echo ========================================
+echo.
+
+echo [1/4] Checking Python...
+python --version >nul 2>&1
+if %errorlevel% neq 0 (
+    echo   X Python not found!
+    echo   Please install Python 3.9+ from https://www.python.org/downloads/
+    pause
+    exit /b 1
+)
+echo   [OK] Python found
+
+echo.
+echo [2/4] Installing dependencies...
+pip install --quiet fastapi uvicorn aiohttp aiosqlite pydantic
+echo   [OK] Dependencies installed
+
+echo.
+echo [3/4] Downloading Lab Dojo...
+curl -L https://github.com/SooparAI/labdojo/archive/refs/heads/main.zip -o labdojo.zip
+powershell -Command "Expand-Archive -Force labdojo.zip ."
+cd labdojo-main
+echo   [OK] Lab Dojo downloaded
+
+echo.
+echo [4/4] Starting Lab Dojo...
+echo   Opening http://localhost:8080 in 5 seconds...
+timeout /t 5 /nobreak
+start http://localhost:8080
+python labdojo.py
+
+pause
+`;
+                const blob = new Blob([batContent], { type: 'text/plain' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'LabDojo_Installer.bat';
+                a.click();
+                URL.revokeObjectURL(url);
+                
+                step1.innerHTML = '✓ Downloaded <strong>LabDojo_Installer.bat</strong>';
+                step3.innerHTML = 'Double-click <strong>LabDojo_Installer.bat</strong> in your Downloads folder';
+                
+            } else if (os === 'mac') {
+                // Create and download .command file
+                const commandContent = `#!/bin/bash
+# Lab Dojo v0.1.2 - One-Click Installer for macOS
+
+echo "╔══════════════════════════════════════════════════════════════╗"
+echo "║                    Lab Dojo v0.1.2 Pathology                ║"
+echo "║              AI Research Workstation                        ║"
+echo "╚══════════════════════════════════════════════════════════════╝"
+echo
+
+echo "[1/4] Checking Python..."
+if command -v python3 &> /dev/null; then
+    echo "  ✓ Python found"
+else
+    echo "  ✗ Python not found. Please install from https://python.org"
+    read -p "Press Enter to exit..."
+    exit 1
+fi
+
+echo
+echo "[2/4] Installing dependencies..."
+pip3 install --quiet fastapi uvicorn aiohttp aiosqlite pydantic
+echo "  ✓ Dependencies installed"
+
+echo
+echo "[3/4] Downloading Lab Dojo..."
+curl -L https://github.com/SooparAI/labdojo/archive/refs/heads/main.zip -o labdojo.zip
+unzip -q labdojo.zip
+cd labdojo-main
+echo "  ✓ Lab Dojo downloaded"
+
+echo
+echo "[4/4] Starting Lab Dojo..."
+echo "  Opening http://localhost:8080 in 5 seconds..."
+sleep 5
+open http://localhost:8080
+python3 labdojo.py
+`;
+                const blob = new Blob([commandContent], { type: 'text/plain' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'LabDojo_Installer.command';
+                a.click();
+                URL.revokeObjectURL(url);
+                
+                step1.innerHTML = '✓ Downloaded <strong>LabDojo_Installer.command</strong>';
+                step3.innerHTML = 'Right-click <strong>LabDojo_Installer.command</strong> → Open → Click "Open"';
+                
+            } else {
+                alert('Unsupported OS. Please use pip install labdojo instead.');
+                return;
+            }
+            
+            instructions.style.display = 'block';
+        }
+    </script>
+</body>
+</html>

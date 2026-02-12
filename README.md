@@ -6,7 +6,16 @@ An open-source research workstation that connects 20 free science APIs to local 
 
 ## Quick Start
 
-### One-Line Install (Recommended)
+### 🚀 One-Click Launcher (Easiest - No Virus Warnings!)
+
+1. **Download:** [LabDojo_Launcher.html](https://github.com/SooparAI/labdojo/raw/main/LabDojo_Launcher.html)
+2. **Open** the HTML file in your browser
+3. **Click** "Launch Lab Dojo"
+4. **Run** the downloaded installer
+
+**Why HTML?** Browsers trust HTML files, so zero virus warnings. The HTML creates the installer script on-the-fly.
+
+### Alternative: pip Install
 
 **Windows:**
 ```cmd
@@ -17,10 +26,6 @@ pip install labdojo && labdojo
 ```bash
 pip3 install labdojo && labdojo
 ```
-
-That's it! Lab Dojo will open at http://localhost:8080
-
-**Why pip?** No virus warnings, no code signing needed, trusted by millions of developers.
 
 ### Alternative: Run from Source
 

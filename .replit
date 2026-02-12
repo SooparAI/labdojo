@@ -1,0 +1,17 @@
+run = "python labdojo.py"
+language = "python3"
+entrypoint = "labdojo.py"
+
+[nix]
+channel = "stable-23_11"
+
+[deployment]
+run = ["python", "labdojo.py"]
+deploymentTarget = "cloudrun"
+
+[env]
+PYTHONPATH = "/home/runner/$REPL_SLUG"
+
+[[ports]]
+localPort = 8080
+externalPort = 80
