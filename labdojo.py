@@ -9,7 +9,7 @@ Requires: Python 3.10+, aiohttp, fastapi, uvicorn, pydantic
 Optional: Ollama (local LLM), Vast.ai serverless, OpenAI/Anthropic keys
 """
 
-__version__ = "0.1.2"
+__version__ = "0.1.3"
 __author__ = "JuiceVendor Labs Inc."
 __license__ = "MIT"
 
@@ -2234,6 +2234,8 @@ body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg-pri
 .setting-row label { width: 160px; font-size: 13px; color: var(--text-secondary); flex-shrink: 0; }
 .setting-row input { flex: 1; background: var(--bg-tertiary); border: 1px solid var(--border); color: var(--text-primary); padding: 8px 12px; border-radius: 6px; font-size: 13px; outline: none; }
 .setting-row input:focus { border-color: var(--accent); }
+.setting-row select { flex: 1; background: var(--bg-tertiary); border: 1px solid var(--border); color: var(--text-primary); padding: 8px 12px; border-radius: 6px; font-size: 13px; outline: none; }
+.setting-row select:focus { border-color: var(--accent); }
 
 /* API Grid */
 .api-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
@@ -2267,7 +2269,7 @@ body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg-pri
 ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
 </style>
 </head>
-<body>
+<body onload="initTheme(); loadQueryHistory();">
 
 <div class="sidebar">
     <div class="sidebar-brand">
@@ -2445,6 +2447,22 @@ body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg-pri
                 <button class="btn btn-primary btn-sm" onclick="saveSettings()">Save</button>
             </div>
             <div class="settings-section">
+                <h3>Interface</h3>
+                <div class="setting-row"><label>Theme:</label>
+                    <select id="set-theme" onchange="setTheme(this.value)">
+                        <option value="light">Light</option>
+                        <option value="dark">Dark</option>
+                        <option value="auto">Auto (System)</option>
+                    </select>
+                </div>
+                <div class="setting-row"><label>Keyboard Shortcuts:</label>
+                    <button class="btn btn-secondary btn-sm" onclick="showKeyboardShortcuts()">View Shortcuts</button>
+                </div>
+                <div class="setting-row"><label>Query History:</label>
+                    <button class="btn btn-secondary btn-sm" onclick="showQueryHistory()">View History</button>
+                </div>
+            </div>
+            <div class="settings-section">
                 <h3>Data Management</h3>
                 <button class="btn btn-secondary btn-sm" onclick="clearConversation()">Clear Chat History</button>
                 <button class="btn btn-secondary btn-sm" onclick="clearBadData()">Clean Bad Data</button>
@@ -2459,6 +2477,73 @@ body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg-pri
 let currentPage = 'chat';
 let currentPipelineType = '';
 let lastPaperPmids = [];
+let queryHistory = [];
+let currentTheme = localStorage.getItem('labdojo-theme') || 'auto';
+
+// Initialize theme
+function initTheme() {
+    const theme = localStorage.getItem('labdojo-theme') || 'auto';
+    document.getElementById('set-theme').value = theme;
+    applyTheme(theme);
+}
+
+function setTheme(theme) {
+    localStorage.setItem('labdojo-theme', theme);
+    applyTheme(theme);
+}
+
+function applyTheme(theme) {
+    if (theme === 'auto') {
+        const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        document.documentElement.style.colorScheme = isDark ? 'dark' : 'light';
+    } else {
+        document.documentElement.style.colorScheme = theme;
+    }
+}
+
+// Keyboard shortcuts
+function showKeyboardShortcuts() {
+    alert('Keyboard Shortcuts:\n\nCtrl+K - Focus search\nCtrl+E - Export results\nCtrl+N - New project\nCtrl+H - View query history\nCtrl+/ - Show this help');
+}
+
+// Query history
+function addToHistory(query) {
+    if (!queryHistory.includes(query)) {
+        queryHistory.unshift(query);
+        if (queryHistory.length > 100) queryHistory.pop();
+        localStorage.setItem('labdojo-query-history', JSON.stringify(queryHistory));
+    }
+}
+
+function loadQueryHistory() {
+    const stored = localStorage.getItem('labdojo-query-history');
+    queryHistory = stored ? JSON.parse(stored) : [];
+}
+
+function showQueryHistory() {
+    if (queryHistory.length === 0) {
+        alert('No query history yet.');
+        return;
+    }
+    const historyStr = queryHistory.slice(0, 20).map((q, i) => `${i+1}. ${q}`).join('\n');
+    alert('Recent Queries:\n\n' + historyStr);
+}
+
+// Keyboard event handler
+document.addEventListener('keydown', (e) => {
+    if (e.ctrlKey || e.metaKey) {
+        if (e.key === 'k') {
+            e.preventDefault();
+            document.getElementById('chat-input').focus();
+        } else if (e.key === 'h') {
+            e.preventDefault();
+            showQueryHistory();
+        } else if (e.key === '/') {
+            e.preventDefault();
+            showKeyboardShortcuts();
+        }
+    }
+});
 
 function showPage(page) {
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
@@ -2510,11 +2595,11 @@ function hideTyping() {
     if (el) el.remove();
 }
 
-async function sendChat() {
+asyncfunction sendMessage() {
     const input = document.getElementById('chat-input');
     const msg = input.value.trim();
     if (!msg) return;
-    input.value = '';
+    addToHistory(msg);   input.value = '';
     addMessage('user', msg, new Date().toLocaleTimeString());
     showTyping();
     try {
